@@ -132,7 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
   vim: false,
   fontSize: 13,
   maxRows: 5000,
-  pageSize: 200,
+  pageSize: 100,
   sidebarWidth: 260,
 };
 
@@ -463,7 +463,14 @@ export const useApp = create<State>()(
     }),
     {
       name: "dbotter",
-      version: 1,
+      version: 2,
+      // v1's default page size was 200; settings saved with it move to the new default
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as { settings?: Settings };
+        if (version < 2 && p.settings?.pageSize === 200) p.settings = { ...p.settings, pageSize: 100 };
+        // merge() below fills in anything missing
+        return p as never;
+      },
       // results and live state are not kept across restarts
       partialize: (s) => ({
         settings: s.settings,

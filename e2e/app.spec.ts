@@ -29,7 +29,7 @@ async function reset(name = "Shop") {
 async function open(page: Page, settings: Record<string, unknown> = {}) {
   await page.addInitScript((s) => {
     if (!localStorage.getItem("dbotter"))
-      localStorage.setItem("dbotter", JSON.stringify({ state: { settings: s }, version: 1 }));
+      localStorage.setItem("dbotter", JSON.stringify({ state: { settings: s }, version: 2 }));
   }, settings);
   await page.goto("/");
 }
@@ -86,7 +86,7 @@ test("browse a table: sort, filter, count, value viewer, structure", async ({ pa
   await connect(page);
   await page.locator(".tree-row", { hasText: "customers" }).click();
   const foot = pane(page).locator(".results-foot");
-  await expect(foot).toContainText("Rows 1–200");
+  await expect(foot).toContainText("Rows 1–100");
   await expect(foot).toContainText("of ~2,501");
   await expect(pane(page).locator(".grid-htype").first()).toHaveText("integer");
 
@@ -145,7 +145,7 @@ test("grid keyboard with vim keys, selection and copy formats", async ({ page })
   expect(await clipboard(page)).toBe("Customer 2");
 
   await page.keyboard.press("G");
-  await expect(pane(page).locator(".grid-cell.active")).toHaveText("Customer 200");
+  await expect(pane(page).locator(".grid-cell.active")).toHaveText("Customer 100");
   await page.keyboard.type("gg");
   await expect(pane(page).locator(".grid-cell.active")).toHaveText("Customer 1");
   await page.keyboard.press("$");
@@ -167,8 +167,8 @@ test("grid keyboard with vim keys, selection and copy formats", async ({ page })
 
   // ] next page; row numbers continue
   await page.keyboard.press("]");
-  await expect(pane(page).locator(".results-foot")).toContainText("Rows 201–400");
-  await expect(pane(page).locator(".grid-gutter").first()).toHaveText("201");
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 101–200");
+  await expect(pane(page).locator(".grid-gutter").first()).toHaveText("101");
 });
 
 test("queries: statement under cursor, results, errors, limits, cancel", async ({ page }) => {
@@ -324,7 +324,7 @@ test("tabs and query text are restored after a restart", async ({ page }) => {
   await expect(pane(page).locator(".cm-content")).toHaveText("select 'kept' as v");
   // the restored table tab reconnects on its own when shown
   await page.locator(".tab", { hasText: "customers" }).click();
-  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–200");
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
 });
 
 test("vim mode in the editor: keys go to vim, :q closes, Ctrl+Shift+T reopens", async ({ page }) => {
@@ -367,7 +367,7 @@ test("sessions: disconnect sticks, edited connections reconnect, odd URLs don't 
   await open(page);
   await connect(page);
   await page.locator(".tree-row", { hasText: "customers" }).click();
-  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–200");
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
   // disconnecting while a table tab is open doesn't reconnect behind your back
   await page.locator(".tree-row", { hasText: "Shop" }).first().click({ button: "right" });
   await page.getByRole("menuitem", { name: "Disconnect" }).click();
@@ -375,7 +375,7 @@ test("sessions: disconnect sticks, edited connections reconnect, odd URLs don't 
   await page.waitForTimeout(500);
   await expect(pane(page).locator(".center-msg")).toContainText("Not connected");
   await pane(page).getByRole("button", { name: "Connect" }).click();
-  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–200");
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
 
   // two tabs running on a disconnected connection share one connect: both get results
   for (const [i, sql] of ["select 'first' as v", "select 'second' as v"].entries()) {
@@ -404,7 +404,7 @@ test("sessions: disconnect sticks, edited connections reconnect, odd URLs don't 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".tree-row", { hasText: "Shop edited" }).locator(".live")).toBeVisible();
   await page.keyboard.press("Control+r");
-  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–200");
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
 
   // a raw % in a pasted URL is kept, not a crash
   await page.getByTitle("New connection").click();
@@ -487,6 +487,16 @@ test("keys: F5 refreshes, no reloads from dialogs, viewer copy, grid Tab, settin
   await page.keyboard.press("Control+Shift+H");
   await page.keyboard.press("Control+Shift+T");
   await expect(page.locator(".tab", { hasText: "History" })).toHaveCount(1);
+});
+
+test("settings saved by v0.0.1 with the old 200-row default move to 100", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("dbotter", JSON.stringify({ state: { settings: { pageSize: 200 } }, version: 1 })),
+  );
+  await page.goto("/");
+  await connect(page);
+  await page.locator(".tree-row", { hasText: "customers" }).click();
+  await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
 });
 
 test("connections: edit and delete with confirmation", async ({ page }) => {

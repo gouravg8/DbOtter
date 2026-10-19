@@ -17,7 +17,7 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 
 **Browse**
 - Sidebar tree: schemas, then tables, views and materialized views, with row estimates; fuzzy search (`/`)
-- Table data: pages of 50 to 5,000 rows, sort by clicking a header, filters (column, operator, value) plus a raw `WHERE` condition, exact count on demand
+- Table data: pages of 100 rows by default (50 to 5,000 in Settings), sort by clicking a header, filters (column, operator, value) plus a raw `WHERE` condition, exact count on demand
 - Structure: columns (type, nullable, default, primary key, comment), indexes with definitions and sizes, constraints, view definitions, table size
 
 **Query**
