@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#0f766e"/>
+  <!-- ears -->
+  <circle cx="238" cy="430" r="46" fill="#8b5a3c"/>
+  <circle cx="786" cy="430" r="46" fill="#8b5a3c"/>
+  <circle cx="238" cy="430" r="22" fill="#5c3a26"/>
+  <circle cx="786" cy="430" r="22" fill="#5c3a26"/>
+  <!-- head -->
+  <ellipse cx="512" cy="560" rx="330" ry="240" fill="#a86f4c"/>
+  <!-- muzzle -->
+  <ellipse cx="512" cy="650" rx="210" ry="130" fill="#f3e3d3"/>
+  <!-- eyes -->
+  <circle cx="400" cy="500" r="36" fill="#1c1917"/>
+  <circle cx="624" cy="500" r="36" fill="#1c1917"/>
+  <circle cx="412" cy="488" r="11" fill="#ffffff"/>
+  <circle cx="636" cy="488" r="11" fill="#ffffff"/>
+  <!-- nose and mouth -->
+  <ellipse cx="512" cy="590" rx="58" ry="40" fill="#1c1917"/>
+  <path d="M512 630 v40 M512 670 q-40 34 -78 6 M512 670 q40 34 78 6" stroke="#1c1917" stroke-width="16" fill="none" stroke-linecap="round"/>
+  <!-- whiskers -->
+  <path d="M330 640 h-110 M330 680 l-100 26 M694 640 h110 M694 680 l100 26" stroke="#f3e3d3" stroke-width="12" stroke-linecap="round"/>
+</svg>
