@@ -155,7 +155,47 @@ e2e/           Playwright tests
 scripts/       test database
 ```
 
-## Next (v0.0.2 ideas)
+## Roadmap: v0.0.2
 
-SSH tunnels · inline cell editing with a review-before-commit step · save results to a file ·
-`EXPLAIN` visualizer · JSONB viewer · more databases.
+Goal: safe and practical on real production databases. v0.0.1 lets you look at data;
+v0.0.2 lets you reach any database, change data safely, and get data out.
+
+### Must-have
+
+1. **SSH tunnels**: connect through a bastion host with a password, a key file or ssh-agent;
+   `~/.ssh/config` host aliases and jump hosts (ProxyJump). Private RDS and most company
+   databases are only reachable this way.
+2. **Connection reliability**: keepalives and automatic reconnect for dropped idle
+   connections (reads only are retried, never writes); a PgBouncer mode without prepared
+   statements, so transaction poolers such as Supabase's port 6543 work; a clear "connection
+   lost" state.
+3. **Edit data with a review step**: edit cells, add and delete rows (tables with a primary
+   key). Changes stay pending and highlighted until you review the generated SQL and commit
+   them in one transaction; discard drops them all.
+4. **Production safety**: read-only connections (refused in the app and opened as read-only
+   transactions); for connections marked as production, a confirmation before `UPDATE` /
+   `DELETE` without `WHERE`, `DROP` and `TRUNCATE`; the open-transaction state shown on the
+   query tab with Commit / Rollback.
+5. **Export to files**: save a result or a whole table as CSV, JSON or SQL `INSERT`s, streamed
+   to disk so large exports never sit in memory.
+
+### Should-have
+
+6. **EXPLAIN view**: `EXPLAIN (ANALYZE)` as a readable plan tree with the slowest steps
+   highlighted.
+7. **JSONB viewer**: collapsible tree for json / jsonb values, with copy path.
+8. **Saved queries**: named snippets per connection, available from the command palette.
+9. **Editor comforts**: SQL formatter (`Ctrl/⌘ Shift F`), confirm before closing a query tab
+   with unsaved SQL (outside vim mode), tab titles that follow the query's first table.
+
+### Later
+
+AI (plain English to SQL, explain a query), ER diagrams, schema diff, RDS IAM tokens and
+client certificates, installers with auto-update and code signing for macOS and Windows.
+
+### Done means
+
+- Tested against a real hosted database (Neon or Supabase) and a Postgres behind an SSH
+  tunnel, not only a local one.
+- Every feature covered by integration and e2e tests, as in v0.0.1.
+- Memory stays at or below ~250 MB in the same measurement as above.
