@@ -1,360 +1,90 @@
-//! Live Postgres sessions: one small connection pool per open connection, so browsing a
-//! table never waits behind a long-running query in another tab.
+//! Open connections by connection id, whatever the engine. Each engine module (pg, mysql,
+//! sqlite) has the same set of operations; this dispatches to them and holds what is shared:
+//! cancelling, and the paging / counting SQL for table browsing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use deadpool_postgres::{ClientWrapper, Manager, ManagerConfig, Object, Pool, RecyclingMethod, Runtime};
-use futures_util::{StreamExt, pin_mut};
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
-use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
-use tokio_postgres::config::SslMode as PgSslMode;
-use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
-use tokio_postgres_rustls::MakeRustlsConnect;
+use tokio::sync::RwLock;
 
 use crate::error::{AppError, AppResult};
 use crate::model::*;
+use crate::mysql::MySession;
+use crate::pg::PgSession;
+use crate::running::Running;
+use crate::sqlite::LiteSession;
 
-const POOL_SIZE: usize = 4;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a query waits for a free pooled connection before giving up.
-const POOL_WAIT: Duration = Duration::from_secs(30);
-/// Result memory cap per run, on top of the row limit (wide rows, huge values).
-pub const MAX_RESULT_BYTES: usize = 64 * 1024 * 1024;
-const CANCELED: &str = "57014";
-const SYSTEM_SCHEMAS: &str = "n.nspname NOT IN ('pg_catalog', 'information_schema') \
-     AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'";
-
-/* ---------- TLS ---------- */
-
-/// For `require`: encrypt, but accept any certificate (what libpq does for sslmode=require).
-#[derive(Debug)]
-struct AcceptAnyCert(Arc<rustls::crypto::CryptoProvider>);
-
-impl ServerCertVerifier for AcceptAnyCert {
-    fn verify_server_cert(
-        &self,
-        _: &CertificateDer<'_>,
-        _: &[CertificateDer<'_>],
-        _: &ServerName<'_>,
-        _: &[u8],
-        _: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
-    }
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
-    }
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
+// one per open connection, behind an Arc: variant sizes don't matter
+#[allow(clippy::large_enum_variant)]
+pub enum Session {
+    Postgres(PgSession),
+    Mysql(MySession),
+    Sqlite(LiteSession),
 }
 
-/// Certificates from a PEM file (like libpq's sslrootcert).
-fn load_root_certs(path: &str) -> AppResult<rustls::RootCertStore> {
-    use rustls::pki_types::pem::PemObject;
-    let bad = |e: &dyn std::fmt::Display| AppError::new(format!("Can't read CA certificate {path}: {e}"));
-    let mut roots = rustls::RootCertStore::empty();
-    for cert in CertificateDer::pem_file_iter(path).map_err(|e| bad(&e))? {
-        roots.add(cert.map_err(|e| bad(&e))?).map_err(|e| bad(&e))?;
-    }
-    if roots.is_empty() {
-        return Err(bad(&"no certificates in the file"));
-    }
-    Ok(roots)
-}
-
-fn tls_connector(mode: SslMode, root_cert: Option<&str>) -> AppResult<MakeRustlsConnect> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let builder = ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|e| AppError::new(format!("TLS setup failed: {e}")))?;
-    let config = if mode == SslMode::VerifyFull {
-        // a CA file replaces the system roots, as in libpq
-        let roots = match root_cert.map(str::trim).filter(|p| !p.is_empty()) {
-            Some(path) => load_root_certs(path)?,
-            None => {
-                let mut roots = rustls::RootCertStore::empty();
-                roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
-                if roots.is_empty() {
-                    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-                }
-                roots
-            }
-        };
-        builder.with_root_certificates(roots).with_no_client_auth()
-    } else {
-        builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert(provider)))
-            .with_no_client_auth()
+/// Calls the same method on whichever engine the session is.
+macro_rules! each {
+    ($session:expr, $s:ident => $body:expr) => {
+        match $session {
+            Session::Postgres($s) => $body,
+            Session::Mysql($s) => $body,
+            Session::Sqlite($s) => $body,
+        }
     };
-    Ok(MakeRustlsConnect::new(config))
-}
-
-fn pg_config(c: &ConnectionConfig, password: Option<&str>) -> tokio_postgres::Config {
-    let mut cfg = tokio_postgres::Config::new();
-    cfg.host(&c.host)
-        .port(c.port)
-        .dbname(&c.database)
-        .user(&c.user)
-        .application_name("DbOtter")
-        .connect_timeout(CONNECT_TIMEOUT)
-        .ssl_mode(match c.ssl_mode {
-            SslMode::Disable => PgSslMode::Disable,
-            SslMode::Prefer => PgSslMode::Prefer,
-            SslMode::Require | SslMode::VerifyFull => PgSslMode::Require,
-        });
-    if let Some(p) = password {
-        cfg.password(p);
-    }
-    cfg
-}
-
-/// Auth failed because no (or a wrong) password was given: the UI then asks for one.
-/// 28000 (no pg_hba entry, unknown role…) is not a password problem and is shown as is.
-fn is_auth_error(e: &AppError) -> bool {
-    e.code.as_deref() == Some("28P01") || e.message.contains("password missing") || e.message.contains("no password")
-}
-
-fn auth_error(e: AppError, had_password: bool) -> AppError {
-    if is_auth_error(&e) {
-        let message = if had_password { e.message.clone() } else { "Password required".to_string() };
-        AppError { message, code: Some("password_required".into()), ..e }
-    } else {
-        e
-    }
-}
-
-/// Collects a simple-query stream into result sets. Past `max_rows` (or the byte cap) rows
-/// are read and dropped rather than stored, so the statement, and any after it, still run
-/// to completion. Ending early would abort a transaction and skip later statements.
-async fn collect_results(
-    stream: tokio_postgres::SimpleQueryStream,
-    max_rows: usize,
-    results: &mut Vec<ResultSet>,
-) -> AppResult<()> {
-    pin_mut!(stream);
-    let mut current: Option<ResultSet> = None;
-    let mut bytes = 0usize;
-    while let Some(msg) = stream.next().await {
-        let msg = match msg {
-            Ok(m) => m,
-            Err(e) => {
-                // a result cut off past the limit is handed back with the error: if the user
-                // cancelled, run() shows those rows rather than only the error
-                if let Some(mut set) = current.take().filter(|c| c.truncated) {
-                    set.row_count = set.rows.len() as u64;
-                    results.push(set);
-                }
-                return Err(e.into());
-            }
-        };
-        match msg {
-            SimpleQueryMessage::RowDescription(cols) => {
-                current = Some(ResultSet {
-                    columns: cols.iter().map(|c| c.name().to_string()).collect(),
-                    has_rows: true,
-                    ..Default::default()
-                });
-            }
-            SimpleQueryMessage::Row(row) => {
-                let set = current.get_or_insert_with(|| ResultSet {
-                    columns: row.columns().iter().map(|c| c.name().to_string()).collect(),
-                    has_rows: true,
-                    ..Default::default()
-                });
-                if set.truncated {
-                    continue;
-                }
-                let size: usize = (0..row.len()).map(|i| row.get(i).map_or(0, str::len) + 16).sum();
-                if set.rows.len() >= max_rows || bytes + size > MAX_RESULT_BYTES {
-                    set.truncated = true;
-                    continue;
-                }
-                bytes += size;
-                set.rows.push((0..row.len()).map(|i| row.get(i).map(str::to_string)).collect());
-            }
-            SimpleQueryMessage::CommandComplete(n) => {
-                let mut set = current.take().unwrap_or_default();
-                // for a truncated result this is the full count, more than `rows`
-                set.row_count = n;
-                results.push(set);
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-/// A query's cancel handle; `None` while it still waits for a connection.
-#[derive(Default)]
-struct RunState {
-    token: Option<(CancelToken, MakeRustlsConnect)>,
-    cancelled: bool,
-}
-
-/// The connection a run uses: a query tab's own one, or one borrowed from the pool.
-enum Conn {
-    Editor(OwnedMutexGuard<ClientWrapper>),
-    Pooled(Box<Object>),
-}
-
-impl Conn {
-    fn client(&self) -> &Client {
-        match self {
-            Conn::Editor(c) => c,
-            Conn::Pooled(c) => c,
-        }
-    }
-}
-
-fn canceled() -> AppError {
-    AppError::new("canceling statement due to user request").with_code(CANCELED)
-}
-
-struct Session {
-    /// For browsing and metadata. User SQL never runs here, so no session state
-    /// (transactions, SET, temp tables) leaks between tabs.
-    pool: Pool,
-    /// One dedicated connection per query tab: BEGIN, UPDATE and COMMIT run one at a time
-    /// all land on the same backend.
-    editors: Mutex<HashMap<String, Arc<Mutex<ClientWrapper>>>>,
-    /// Bumped when a tab's connection is released, so a connection that was still being
-    /// opened for it at the time is closed instead of kept.
-    editor_gen: std::sync::Mutex<HashMap<String, u64>>,
-    /// Primary keys by (schema, table), for stable paging; cleared on schema reload.
-    primary_keys: Mutex<HashMap<(String, String), Vec<String>>>,
-    tls: MakeRustlsConnect,
-    info: SessionInfo,
-    /// server_version_num, e.g. 180006
-    version: i32,
 }
 
 impl Session {
-    fn generation(&self, tab: &str) -> u64 {
-        *self.editor_gen.lock().unwrap().get(tab).unwrap_or(&0)
+    pub fn info(&self) -> &SessionInfo {
+        each!(self, s => &s.info)
     }
 
-    async fn pooled(&self) -> AppResult<Object> {
-        self.pool.get().await.map_err(|e| match e {
-            deadpool_postgres::PoolError::Timeout(_) => {
-                AppError::new("All connections are busy (a long query in another tab?). Try again or cancel it.")
-            }
-            other => other.into(),
-        })
-    }
-
-    /// The query tab's own connection, opened on first use and replaced if it dropped.
-    async fn editor(&self, tab: &str) -> AppResult<OwnedMutexGuard<ClientWrapper>> {
-        let existing = self.editors.lock().await.get(tab).cloned();
-        if let Some(slot) = existing {
-            let guard = slot.lock_owned().await;
-            if !guard.is_closed() {
-                return Ok(guard);
-            }
-        }
-        let generation = self.generation(tab);
-        // taken out of the pool for good: it belongs to the tab now
-        let client = Object::take(self.pooled().await?);
-        if self.generation(tab) != generation {
-            // the tab was closed while this was being opened: don't keep it
-            return Err(canceled());
-        }
-        let slot = Arc::new(Mutex::new(client));
-        self.editors.lock().await.insert(tab.to_string(), slot.clone());
-        Ok(slot.lock_owned().await)
+    fn close(&self) {
+        each!(self, s => s.close())
     }
 }
 
+/// "Column does not exist", per engine (Postgres SQLSTATE, MySQL error number, SQLite text).
+fn is_unknown_column(e: &AppError) -> bool {
+    matches!(e.code.as_deref(), Some("42703") | Some("1054")) || e.message.contains("no such column")
+}
+
+#[derive(Default)]
 pub struct Db {
     sessions: RwLock<HashMap<String, Arc<Session>>>,
     /// Running queries by the UI's query id, for cancelling.
-    running: Mutex<HashMap<String, RunState>>,
-}
-
-impl Default for Db {
-    fn default() -> Self {
-        Self::new()
-    }
+    running: Running,
 }
 
 impl Db {
     pub fn new() -> Self {
-        Self { sessions: RwLock::new(HashMap::new()), running: Mutex::new(HashMap::new()) }
+        Self::default()
     }
 
     /// One-off connection to check settings from the connection form.
     pub async fn test(&self, c: &ConnectionConfig, password: Option<&str>) -> AppResult<TestResult> {
-        let started = Instant::now();
-        let tls = tls_connector(c.ssl_mode, c.ssl_root_cert.as_deref())?;
-        let (client, connection) =
-            pg_config(c, password).connect(tls).await.map_err(|e| auth_error(e.into(), password.is_some()))?;
-        let handle = tokio::spawn(connection);
-        let row = client.query_one("SELECT current_setting('server_version')", &[]).await?;
-        let latency_ms = started.elapsed().as_millis() as u64;
-        drop(client);
-        let _ = handle.await;
-        Ok(TestResult { server_version: row.get(0), latency_ms })
+        match c.kind {
+            DbKind::Postgres => PgSession::test(c, password).await,
+            DbKind::Mysql => MySession::test(c, password).await,
+            DbKind::Sqlite => LiteSession::test(c).await,
+        }
     }
 
     pub async fn connect(&self, c: &ConnectionConfig, password: Option<&str>) -> AppResult<SessionInfo> {
-        let tls = tls_connector(c.ssl_mode, c.ssl_root_cert.as_deref())?;
-        let manager = Manager::from_config(
-            pg_config(c, password),
-            tls.clone(),
-            ManagerConfig { recycling_method: RecyclingMethod::Fast },
-        );
-        let pool = Pool::builder(manager)
-            .max_size(POOL_SIZE)
-            .runtime(Runtime::Tokio1)
-            .wait_timeout(Some(POOL_WAIT))
-            .build()
-            .map_err(|e| AppError::new(e.to_string()))?;
-        let client = pool.get().await.map_err(|e| auth_error(e.into(), password.is_some()))?;
-        let row = client
-            .query_one(
-                "SELECT current_setting('server_version'), current_database()::text, current_user::text,
-                        current_setting('server_version_num')::int",
-                &[],
-            )
-            .await?;
-        drop(client);
-        let info = SessionInfo { server_version: row.get(0), database: row.get(1), user: row.get(2) };
-        let session = Arc::new(Session {
-            pool,
-            editors: Mutex::new(HashMap::new()),
-            editor_gen: std::sync::Mutex::new(HashMap::new()),
-            primary_keys: Mutex::new(HashMap::new()),
-            tls,
-            info: info.clone(),
-            version: row.get(3),
-        });
-        if let Some(old) = self.sessions.write().await.insert(c.id.clone(), session) {
-            old.pool.close();
+        let session = match c.kind {
+            DbKind::Postgres => Session::Postgres(PgSession::connect(c, password).await?),
+            DbKind::Mysql => Session::Mysql(MySession::connect(c, password).await?),
+            DbKind::Sqlite => Session::Sqlite(LiteSession::connect(c).await?),
+        };
+        let info = session.info().clone();
+        if let Some(old) = self.sessions.write().await.insert(c.id.clone(), Arc::new(session)) {
+            old.close();
         }
         Ok(info)
     }
 
     pub async fn disconnect(&self, id: &str) {
         if let Some(s) = self.sessions.write().await.remove(id) {
-            s.pool.close();
+            s.close();
         }
     }
 
@@ -372,12 +102,13 @@ impl Db {
     }
 
     pub async fn session_info(&self, id: &str) -> AppResult<SessionInfo> {
-        Ok(self.session(id).await?.info.clone())
+        Ok(self.session(id).await?.info().clone())
     }
 
-    /// Runs `sql` (one or more statements) with the simple query protocol, so every value
-    /// arrives as Postgres' own text output and any type displays correctly. With `editor`
-    /// (a query tab id) it runs on that tab's own connection, otherwise on a pooled one.
+    /// Runs `sql` (one or more statements). With `editor` (a query tab id) it runs on that
+    /// tab's own connection, so transactions and session settings carry over between runs.
+    /// `single_statement` refuses SQL that holds more than one statement (browse SQL that
+    /// includes the user's WHERE text).
     pub async fn run(
         &self,
         conn_id: &str,
@@ -389,331 +120,59 @@ impl Db {
     ) -> AppResult<QueryOutput> {
         let session = self.session(conn_id).await?;
         // registered before waiting for a connection, so a cancel in the meantime counts
-        self.running.lock().await.insert(query_id.to_string(), RunState::default());
-        let conn = match editor {
-            Some(tab) => session.editor(tab).await.map(Conn::Editor),
-            None => session.pooled().await.map(|c| Conn::Pooled(Box::new(c))),
-        };
-        let conn = match conn {
-            Ok(c) => c,
-            Err(e) => {
-                self.running.lock().await.remove(query_id);
-                return Err(e);
-            }
-        };
-        {
-            let mut running = self.running.lock().await;
-            let state = running.entry(query_id.to_string()).or_default();
-            if state.cancelled {
-                running.remove(query_id);
-                return Err(canceled());
-            }
-            state.token = Some((conn.client().cancel_token(), session.tls.clone()));
-        }
-        let started = Instant::now();
-        let mut results = Vec::new();
-        // SQL that includes the user's WHERE text must be one statement: Postgres refuses to
-        // prepare several, so `true); DELETE …` can't sneak in whatever the quoting. Done here,
-        // after the cancel handle is registered, as preparing can wait on table locks.
-        if single_statement && let Err(e) = conn.client().prepare(sql).await {
-            self.running.lock().await.remove(query_id);
-            let e = AppError::from(e);
-            return Err(if e.code.as_deref() == Some("42601") && e.message.contains("multiple commands") {
-                AppError::new("A WHERE condition can't contain several statements (use a query tab for that)").with_code("42601")
-            } else {
-                e
-            });
-        }
-        let outcome = match conn.client().simple_query_raw(sql).await {
-            Ok(stream) => collect_results(stream, max_rows.max(1), &mut results).await,
-            Err(e) => Err(e.into()),
-        };
-        let duration_ms = started.elapsed().as_millis() as u64;
-        let user_cancelled = self.running.lock().await.remove(query_id).is_some_and(|s| s.cancelled);
-        match outcome {
-            Ok(()) => Ok(QueryOutput { results, duration_ms, canceled: false }),
-            // cancelled (by the user, not statement_timeout) while past the row limit: the
-            // rows shown stay, flagged so the UI says later statements didn't run. Only when
-            // every result is rows: a batch is one implicit transaction, so earlier writes in
-            // it were rolled back and must not look done.
-            Err(e)
-                if e.code.as_deref() == Some(CANCELED)
-                    && user_cancelled
-                    && results.last().is_some_and(|r| r.truncated)
-                    && results.iter().all(|r| r.has_rows) =>
-            {
-                Ok(QueryOutput { results, duration_ms, canceled: true })
-            }
-            Err(e) => Err(e),
-        }
+        self.running.begin(query_id).await;
+        let r = &self.running;
+        each!(&*session, s => s.run(r, query_id, sql, max_rows, editor, single_statement).await)
     }
 
-    /// Closes a query tab's connection (the tab was closed).
+    /// Closes a query tab's own connection (the tab was closed or changed connection).
     pub async fn release_editor(&self, tab: &str) {
-        for s in self.sessions.read().await.values() {
-            *s.editor_gen.lock().unwrap().entry(tab.to_string()).or_default() += 1;
-            s.editors.lock().await.remove(tab);
+        let sessions: Vec<Arc<Session>> = self.sessions.read().await.values().cloned().collect();
+        for s in sessions {
+            each!(&*s, s => s.release_editor(tab).await);
         }
     }
 
     /// Returns false when the query already finished.
     pub async fn cancel(&self, query_id: &str) -> AppResult<bool> {
-        let token = {
-            let mut running = self.running.lock().await;
-            let Some(state) = running.get_mut(query_id) else {
-                return Ok(false);
-            };
-            state.cancelled = true;
-            match &state.token {
-                Some(t) => t.clone(),
-                // still waiting for a connection: it stops as soon as it gets one
-                None => return Ok(true),
-            }
-        };
-        token.0.cancel_query(token.1).await?;
-        Ok(true)
+        self.running.cancel(query_id).await
     }
 
     pub async fn schema(&self, conn_id: &str) -> AppResult<SchemaTree> {
         let session = self.session(conn_id).await?;
-        session.primary_keys.lock().await.clear();
-        let client = session.pooled().await?;
-        let schemas = client
-            .query(
-                &format!("SELECT n.nspname::text FROM pg_namespace n WHERE {SYSTEM_SCHEMAS} ORDER BY n.nspname = 'public' DESC, 1"),
-                &[],
-            )
-            .await?;
-        let relations = client
-            .query(
-                &format!(
-                    "SELECT n.nspname::text, c.relname::text, c.relkind::text, c.reltuples::bigint
-                     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition AND {SYSTEM_SCHEMAS}
-                     ORDER BY 1, 2"
-                ),
-                &[],
-            )
-            .await?;
-        let columns = client
-            .query(
-                &format!(
-                    "SELECT n.nspname::text, c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod)
-                     FROM pg_attribute a
-                     JOIN pg_class c ON c.oid = a.attrelid
-                     JOIN pg_namespace n ON n.oid = c.relnamespace
-                     WHERE a.attnum > 0 AND NOT a.attisdropped
-                       AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition AND {SYSTEM_SCHEMAS}
-                     ORDER BY 1, 2, a.attnum"
-                ),
-                &[],
-            )
-            .await?;
-
-        let mut cols: HashMap<(String, String), Vec<ColumnBrief>> = HashMap::new();
-        for r in &columns {
-            cols.entry((r.get(0), r.get(1)))
-                .or_default()
-                .push(ColumnBrief { name: r.get(2), data_type: r.get(3) });
-        }
-        let mut tree: Vec<SchemaNode> =
-            schemas.iter().map(|r| SchemaNode { name: r.get(0), relations: vec![] }).collect();
-        for r in &relations {
-            let (schema, name, kind): (String, String, String) = (r.get(0), r.get(1), r.get(2));
-            let kind = match kind.as_str() {
-                "v" => RelationKind::View,
-                "m" => RelationKind::MaterializedView,
-                "f" => RelationKind::ForeignTable,
-                _ => RelationKind::Table,
-            };
-            let columns = cols.remove(&(schema.clone(), name.clone())).unwrap_or_default();
-            if let Some(node) = tree.iter_mut().find(|s| s.name == schema) {
-                node.relations.push(RelationNode { name, kind, estimated_rows: r.get(3), columns });
-            }
-        }
-        Ok(SchemaTree { schemas: tree })
+        each!(&*session, s => s.schema().await)
     }
 
     pub async fn structure(&self, conn_id: &str, schema: &str, table: &str) -> AppResult<TableStructure> {
         let session = self.session(conn_id).await?;
-        // a structure reload (the table tab's refresh) also refreshes the cached key
-        session.primary_keys.lock().await.remove(&(schema.to_string(), table.to_string()));
-        // generated columns arrived in Postgres 12
-        let generated = if session.version >= 120000 { "a.attgenerated::text" } else { "''::text" };
-        let client = session.pooled().await?;
-        let rel = crate::sql::qualified(schema, table);
-        let head = client
-            .query_opt(
-                "SELECT c.oid::bigint, c.relkind::text, c.reltuples::bigint,
-                        CASE WHEN c.relkind IN ('r', 'm') THEN pg_size_pretty(pg_total_relation_size(c.oid))
-                             -- a partitioned table holds no data itself: sum its partitions, at any depth
-                             -- (pg_inherits rather than pg_partition_tree, which needs Postgres 12)
-                             WHEN c.relkind = 'p' THEN pg_size_pretty((
-                               WITH RECURSIVE tree(oid) AS (
-                                 SELECT c.oid UNION ALL SELECT i.inhrelid FROM pg_inherits i JOIN tree ON i.inhparent = tree.oid)
-                               SELECT coalesce(sum(pg_total_relation_size(oid)), 0)::bigint FROM tree)) END,
-                        CASE WHEN c.relkind IN ('v', 'm') THEN pg_get_viewdef(c.oid, true) END,
-                        obj_description(c.oid, 'pg_class')
-                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = $1 AND c.relname = $2",
-                &[&schema, &table],
-            )
-            .await?
-            .ok_or_else(|| AppError::new(format!("{rel} not found")).with_code("not_found"))?;
-        let oid: i64 = head.get(0);
-        let oid = oid as u32;
-
-        let columns = client
-            .query(
-                &format!("SELECT a.attname::text, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull,
-                        pg_get_expr(d.adbin, d.adrelid),
-                        EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = a.attrelid AND i.indisprimary
-                                AND a.attnum = ANY(i.indkey)),
-                        col_description(a.attrelid, a.attnum), {generated}, a.attidentity::text
-                 FROM pg_attribute a
-                 LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-                 WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
-                 ORDER BY a.attnum"),
-                &[&oid],
-            )
-            .await?
-            .iter()
-            .map(|r| {
-                let expr: Option<String> = r.get(3);
-                let (generated, identity): (String, String) = (r.get(6), r.get(7));
-                ColumnInfo {
-                    name: r.get(0),
-                    data_type: r.get(1),
-                    nullable: r.get(2),
-                    // generated columns keep their expression in pg_attrdef too
-                    default: if generated.is_empty() { expr.clone() } else { None },
-                    generated: match generated.as_str() {
-                        "s" => expr.map(|e| format!("GENERATED ALWAYS AS ({e}) STORED")),
-                        "v" => expr.map(|e| format!("GENERATED ALWAYS AS ({e}) VIRTUAL")),
-                        _ => match identity.as_str() {
-                            "a" => Some("GENERATED ALWAYS AS IDENTITY".into()),
-                            "d" => Some("GENERATED BY DEFAULT AS IDENTITY".into()),
-                            _ => None,
-                        },
-                    },
-                    primary_key: r.get(4),
-                    comment: r.get(5),
-                }
-            })
-            .collect();
-
-        let indexes = client
-            .query(
-                "SELECT ci.relname::text, pg_get_indexdef(i.indexrelid), i.indisunique, i.indisprimary,
-                        pg_size_pretty(pg_relation_size(i.indexrelid))
-                 FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid
-                 WHERE i.indrelid = $1
-                 ORDER BY i.indisprimary DESC, ci.relname",
-                &[&oid],
-            )
-            .await?
-            .iter()
-            .map(|r| IndexInfo {
-                name: r.get(0),
-                definition: r.get(1),
-                unique: r.get(2),
-                primary: r.get(3),
-                size: r.get(4),
-            })
-            .collect();
-
-        let constraints = client
-            .query(
-                "SELECT conname::text, contype::text, pg_get_constraintdef(oid, true)
-                 FROM pg_constraint
-                 -- Postgres 18 also lists NOT NULL as constraints ('n'); the columns show those
-                 WHERE conrelid = $1 AND contype <> 'n'
-                 ORDER BY contype = 'p' DESC, contype = 'f' DESC, conname",
-                &[&oid],
-            )
-            .await?
-            .iter()
-            .map(|r| {
-                let kind: String = r.get(1);
-                ConstraintInfo {
-                    name: r.get(0),
-                    kind: match kind.as_str() {
-                        "p" => "primary key",
-                        "f" => "foreign key",
-                        "u" => "unique",
-                        "c" => "check",
-                        "x" => "exclusion",
-                        _ => "other",
-                    }
-                    .to_string(),
-                    definition: r.get(2),
-                }
-            })
-            .collect();
-
-        Ok(TableStructure {
-            columns,
-            indexes,
-            constraints,
-            estimated_rows: head.get(2),
-            total_size: head.get(3),
-            definition: head.get(4),
-            comment: head.get(5),
-        })
-    }
-
-    /// Primary key columns in key order (empty for views and tables without one).
-    async fn primary_key(&self, conn_id: &str, schema: &str, table: &str) -> AppResult<Vec<String>> {
-        let session = self.session(conn_id).await?;
-        let key = (schema.to_string(), table.to_string());
-        if let Some(pk) = session.primary_keys.lock().await.get(&key) {
-            return Ok(pk.clone());
-        }
-        let client = session.pooled().await?;
-        let rows = client
-            .query(
-                "SELECT a.attname::text
-                 FROM pg_index i
-                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                 WHERE i.indrelid = to_regclass(format('%I.%I', $1::text, $2::text)) AND i.indisprimary
-                 ORDER BY array_position(i.indkey::int2[], a.attnum)",
-                &[&schema, &table],
-            )
-            .await?;
-        let pk: Vec<String> = rows.iter().map(|r| r.get(0)).collect();
-        session.primary_keys.lock().await.insert(key, pk.clone());
-        Ok(pk)
-    }
-
-    async fn forget_primary_key(&self, conn_id: &str, schema: &str, table: &str) {
-        if let Ok(session) = self.session(conn_id).await {
-            session.primary_keys.lock().await.remove(&(schema.to_string(), table.to_string()));
-        }
+        each!(&*session, s => s.structure(schema, table).await)
     }
 
     pub async fn table_rows(&self, conn_id: &str, query_id: &str, q: &TableQuery) -> AppResult<TableRows> {
+        let session = self.session(conn_id).await?;
+        let dialect = session.info().kind.dialect();
+        let primary_key = || async { each!(&*session, s => s.primary_key(&q.schema, &q.table).await) };
         // without an ORDER BY, LIMIT/OFFSET pages can repeat or skip rows
-        let order = if q.sort.is_none() { self.primary_key(conn_id, &q.schema, &q.table).await? } else { vec![] };
+        let order = if q.sort.is_none() { primary_key().await? } else { vec![] };
         let raw = q.where_raw.as_deref().is_some_and(|w| !w.trim().is_empty());
-        let sql = crate::sql::table_select(q, &order)?;
-        let out = match self.run(conn_id, query_id, &sql, q.limit as usize, None, raw).await {
+        let sql = crate::sql::table_select(dialect, q, &order)?;
+        let (sql, out) = match self.run(conn_id, query_id, &sql, q.limit as usize, None, raw).await {
             // the key changed since it was cached (renamed column, new key): look it up again
-            Err(e) if e.code.as_deref() == Some("42703") && !order.is_empty() => {
-                self.forget_primary_key(conn_id, &q.schema, &q.table).await;
-                let order = self.primary_key(conn_id, &q.schema, &q.table).await?;
-                let sql = crate::sql::table_select(q, &order)?;
+            Err(e) if is_unknown_column(&e) && !order.is_empty() => {
+                each!(&*session, s => s.forget_primary_key(&q.schema, &q.table).await);
+                let sql = crate::sql::table_select(dialect, q, &primary_key().await?)?;
                 let out = self.run(conn_id, query_id, &sql, q.limit as usize, None, raw).await?;
-                let result = out.results.into_iter().next().unwrap_or_default();
-                return Ok(TableRows { sql, result, duration_ms: out.duration_ms });
+                (sql, out)
             }
-            other => other?,
+            other => (sql, other?),
         };
         let result = out.results.into_iter().next().unwrap_or_default();
         Ok(TableRows { sql, result, duration_ms: out.duration_ms })
     }
 
     pub async fn table_count(&self, conn_id: &str, query_id: &str, q: &TableQuery) -> AppResult<i64> {
-        let sql = crate::sql::table_count(q)?;
+        let dialect = self.session(conn_id).await?.info().kind.dialect();
+        let sql = crate::sql::table_count(dialect, q)?;
         let raw = q.where_raw.as_deref().is_some_and(|w| !w.trim().is_empty());
         let out = self.run(conn_id, query_id, &sql, 1, None, raw).await?;
         out.results

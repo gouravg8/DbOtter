@@ -15,11 +15,36 @@ pub enum SslMode {
     VerifyFull,
 }
 
+/// Which database engine a connection talks to.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DbKind {
+    /// Saved connections from before other engines existed have no kind: Postgres.
+    #[default]
+    Postgres,
+    /// MySQL and MariaDB.
+    Mysql,
+    /// A database file; `database` holds its path, host / port / user are unused.
+    Sqlite,
+}
+
+impl DbKind {
+    pub fn dialect(self) -> crate::sql::Dialect {
+        match self {
+            DbKind::Postgres => crate::sql::Dialect::Postgres,
+            DbKind::Mysql => crate::sql::Dialect::Mysql,
+            DbKind::Sqlite => crate::sql::Dialect::Sqlite,
+        }
+    }
+}
+
 /// A saved connection. The password is never stored here, only in the OS keychain.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionConfig {
     pub id: String,
+    #[serde(default)]
+    pub kind: DbKind,
     pub name: String,
     pub host: String,
     pub port: u16,
@@ -46,6 +71,8 @@ pub struct ConnectionConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInput {
     pub id: Option<String>,
+    #[serde(default)]
+    pub kind: DbKind,
     pub name: String,
     pub host: String,
     pub port: u16,
@@ -65,6 +92,8 @@ pub struct ConnectionInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestResult {
+    /// "PostgreSQL", "MySQL", "MariaDB" or "SQLite"
+    pub product: String,
     pub server_version: String,
     pub latency_ms: u64,
 }
@@ -72,9 +101,14 @@ pub struct TestResult {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
+    pub kind: DbKind,
+    /// "PostgreSQL", "MySQL", "MariaDB" or "SQLite"
+    pub product: String,
     pub server_version: String,
     pub database: String,
     pub user: String,
+    /// Where unqualified names resolve: public, the MySQL database, or main.
+    pub default_schema: String,
 }
 
 /* ---------- schema ---------- */

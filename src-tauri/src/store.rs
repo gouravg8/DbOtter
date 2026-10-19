@@ -142,6 +142,7 @@ mod tests {
     fn conn(id: &str, name: &str) -> ConnectionConfig {
         ConnectionConfig {
             id: id.into(),
+            kind: Default::default(),
             name: name.into(),
             host: "localhost".into(),
             port: 5432,

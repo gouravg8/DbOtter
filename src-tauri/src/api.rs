@@ -171,8 +171,17 @@ impl App {
         }
     }
 
-    async fn save_connection(&self, input: ConnectionInput) -> AppResult<ConnectionConfig> {
-        if input.host.trim().is_empty() || input.user.trim().is_empty() {
+    async fn save_connection(&self, mut input: ConnectionInput) -> AppResult<ConnectionConfig> {
+        let sqlite = input.kind == DbKind::Sqlite;
+        if sqlite {
+            // a SQLite file has no password
+            input.password = None;
+            input.save_password = false;
+        }
+        if sqlite && input.database.trim().is_empty() {
+            return Err(AppError::new("The database file path is required"));
+        }
+        if !sqlite && (input.host.trim().is_empty() || input.user.trim().is_empty()) {
             return Err(AppError::new("Host and user are required"));
         }
         let existing = match &input.id {
@@ -180,12 +189,17 @@ impl App {
             None => None,
         };
         let id = input.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let file_name = || {
+            let path = input.database.trim();
+            std::path::Path::new(path).file_name().map_or(path.to_string(), |f| f.to_string_lossy().into_owned())
+        };
         let conn = ConnectionConfig {
             id: id.clone(),
-            name: if input.name.trim().is_empty() {
-                format!("{}@{}", input.database, input.host)
-            } else {
-                input.name.trim().to_string()
+            kind: input.kind,
+            name: match input.name.trim() {
+                "" if sqlite => file_name(),
+                "" => format!("{}@{}", input.database, input.host),
+                name => name.to_string(),
             },
             host: input.host.trim().to_string(),
             port: input.port,
@@ -197,6 +211,7 @@ impl App {
             ssl_root_cert: input.ssl_root_cert.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             created_at: existing.as_ref().map(|c| c.created_at).unwrap_or_else(now_ms),
         };
+
         // keychain first: if saving fails, the connection isn't saved half-way
         match (&input.password, input.save_password) {
             (Some(p), true) if !p.is_empty() => {
@@ -247,6 +262,7 @@ impl App {
             _ => None,
         };
         let conn = ConnectionConfig {
+            kind: input.kind,
             id: input.id.clone().unwrap_or_default(),
             name: input.name,
             host: input.host,
