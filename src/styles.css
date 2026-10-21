@@ -1637,8 +1637,11 @@ body.col-resize * {
   border-radius: 5px;
   cursor: pointer;
 }
-.menu-item.active {
-  background: var(--hover);
+/* from the text color, not --hover: several themes make --hover the same as --elevated,
+   the menu's own background, so a hovered item didn't show */
+.menu-item.active,
+.menu-item:not(:disabled):hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
 }
 .menu-item.danger {
   color: var(--danger);
