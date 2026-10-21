@@ -635,6 +635,54 @@ test("production connections ask before risky statements", async ({ page }) => {
   await expect(pane(page).locator(".results-message")).toContainText("2 rows affected");
 });
 
+test("query tabs show an open transaction, commit / rollback it, and ask before closing", async ({ page }) => {
+  await open(page);
+  await connect(page);
+  await page.keyboard.press("Control+t");
+  const editor = pane(page).locator(".cm-content");
+  const pill = pane(page).locator(".tx-pill");
+  const runSql = async (sql: string) => {
+    await editor.click();
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type(sql);
+    await page.keyboard.press("Control+Enter");
+  };
+  await runSql("create temp table scratch as select 1 as a");
+  await expect(pane(page).locator(".results-message")).toContainText("Statement OK");
+  await expect(pill).toHaveCount(0);
+
+  await runSql("begin");
+  await expect(pill).toContainText("Transaction open");
+  await runSql("update scratch set a = 2");
+  await expect(pill).toContainText("Transaction open");
+  await pill.getByRole("button", { name: "Rollback" }).click();
+  await expect(pill).toHaveCount(0);
+  await runSql("select a from scratch");
+  await expect(pane(page).locator(".grid-cell").first()).toHaveText("1");
+
+  await runSql("begin");
+  await runSql("update scratch set a = 3");
+  await pill.getByRole("button", { name: "Commit" }).click();
+  await expect(pill).toHaveCount(0);
+  await runSql("select a from scratch");
+  await expect(pane(page).locator(".grid-cell").first()).toHaveText("3");
+
+  // a failed statement aborts the transaction: only Rollback is offered
+  await runSql("begin");
+  await runSql("select 1/0");
+  await expect(pill).toContainText("Transaction aborted");
+  await expect(pill.getByRole("button", { name: "Commit" })).toHaveCount(0);
+
+  // closing asks first; Cancel keeps the tab
+  await page.keyboard.press("Control+w");
+  await expect(page.getByRole("dialog")).toContainText("open transaction");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator(".tab")).toHaveCount(1);
+  await page.keyboard.press("Control+w");
+  await page.getByRole("button", { name: "Close and roll back" }).click();
+  await expect(page.locator(".tab")).toHaveCount(0);
+});
+
 test("connections: edit and delete with confirmation", async ({ page }) => {
   await open(page);
   const row = page.locator(".tree-row", { hasText: "Shop" });

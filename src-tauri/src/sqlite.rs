@@ -673,6 +673,12 @@ impl LiteSession {
         out.finish(outcome, user_cancelled, duration_ms)
     }
 
+    pub async fn transaction_status(&self, tab: &str) -> AppResult<TxState> {
+        let Some(conn) = self.editors.lock().await.get(tab).cloned() else { return Ok(TxState::None) };
+        let db = conn.db.lock_owned().await;
+        blocking(move || Ok(if db.is_autocommit() { TxState::Idle } else { TxState::Open })).await
+    }
+
     /// Closes a query tab's connection (the tab was closed). An open transaction in it is
     /// rolled back.
     pub async fn release_editor(&self, tab: &str) {

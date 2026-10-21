@@ -26,7 +26,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
   const settings = useApp((s) => s.settings);
   const session = useApp((s) => (tab.connId ? s.sessions[tab.connId] : undefined));
   const conn = useApp((s) => s.connections.find((c) => c.id === tab.connId));
-  const { updateTab, runQuery, cancelQuery, openHistory } = useApp.getState();
+  const { updateTab, runQuery, cancelQuery, openHistory, endTransaction, setDialog } = useApp.getState();
   const [now, setNow] = useState(Date.now());
   const [vimMode, setVimMode] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -127,9 +127,20 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
           value={tab.connId}
           onChange={(connId) => {
             if (connId === tab.connId) return;
-            // the tab's own connection belonged to the old database
-            void api.releaseEditor(tab.id).catch(() => {});
-            updateTab(tab.id, { connId });
+            const change = () => {
+              // the tab's own connection belonged to the old database
+              void api.releaseEditor(tab.id).catch(() => {});
+              updateTab(tab.id, { connId, tx: undefined });
+            };
+            if (tab.tx === "open" || tab.tx === "aborted")
+              setDialog({
+                kind: "confirm",
+                title: "Switch connection?",
+                body: "This tab has an open transaction on the current connection: switching rolls it back.",
+                action: "Switch and roll back",
+                onConfirm: change,
+              });
+            else change();
           }}
         />
         <div className="toolbar-sep" />
@@ -151,6 +162,20 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
         <button type="button" className="btn" onClick={runAll} disabled={!tab.connId || !!tab.running} title={`Run everything (${MOD} Shift Enter)`}>
           Run all
         </button>
+        {(tab.tx === "open" || tab.tx === "aborted") && (
+          <div className={`tx-pill ${tab.tx}`} role="status">
+            <span className="tx-dot" />
+            {tab.tx === "open" ? "Transaction open" : "Transaction aborted"}
+            {tab.tx === "open" && (
+              <button type="button" className="btn small" disabled={!!tab.running} onClick={() => void endTransaction(tab.id, "COMMIT")}>
+                Commit
+              </button>
+            )}
+            <button type="button" className="btn small" disabled={!!tab.running} onClick={() => void endTransaction(tab.id, "ROLLBACK")}>
+              Rollback
+            </button>
+          </div>
+        )}
         <div className="spacer" />
         {session?.status === "connected" && session.info && (
           <span className="muted small toolbar-info">
@@ -220,7 +245,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
                     className={`result-tab ${i === tab.activeResult ? "active" : ""}`}
                     onClick={() => updateTab(tab.id, { activeResult: i })}
                   >
-                    {i + 1}. {r.hasRows ? `${formatCount(r.rows.length)} rows` : `${formatCount(r.rowCount)} affected`}
+                    {i + 1}. {r.hasRows ? `${formatCount(r.rows.length)} row${r.rows.length === 1 ? "" : "s"}` : `${formatCount(r.rowCount)} affected`}
                   </button>
                 ))}
               </div>

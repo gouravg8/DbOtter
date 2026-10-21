@@ -11,6 +11,7 @@ import {
   type RelationKind,
   type SchemaTree,
   type SessionInfo,
+  type TxState,
 } from "./api";
 import { riskyStatements, type Risk } from "./risk";
 import { SYSTEM_THEME_ID, type Theme } from "./themes";
@@ -47,6 +48,8 @@ export interface QueryTab {
   error?: AppError & { offset: number; sql: string };
   activeResult: number;
   editorHeight?: number;
+  /** The tab's own session, after its last run. */
+  tx?: TxState;
 }
 
 export interface TableTab {
@@ -114,9 +117,14 @@ interface State {
   openQueryTab: (connId?: string | null, sql?: string) => string;
   openTable: (connId: string, schema: string, table: string, relKind: RelationKind, view?: TableTab["view"]) => void;
   openHistory: () => void;
-  closeTab: (id: string) => void;
+  /** Asks first when the tab has an open transaction (closing rolls it back), unless `force`. */
+  closeTab: (id: string, force?: boolean) => void;
   /** Closes several tabs; `keep` (if given) becomes the active one. */
-  closeTabs: (ids: string[], keep?: string) => void;
+  closeTabs: (ids: string[], keep?: string, force?: boolean) => void;
+  /** Asks the tab's session whether it is inside a transaction. */
+  refreshTx: (tabId: string) => Promise<void>;
+  /** COMMIT or ROLLBACK the tab's transaction, leaving its results as they are. */
+  endTransaction: (tabId: string, statement: "COMMIT" | "ROLLBACK") => Promise<void>;
   reopenClosedTab: () => void;
   setActiveTab: (id: string) => void;
   cycleTab: (delta: 1 | -1) => void;
@@ -341,10 +349,23 @@ export const useApp = create<State>()(
         set({ tabs: [...get().tabs, tab], activeTabId: tab.id });
       },
 
-      closeTab: (id) => {
+      closeTab: (id, force = false) => {
         const tabs = get().tabs;
         const i = tabs.findIndex((t) => t.id === id);
         if (i < 0) return;
+        const open = tabs[i];
+        if (!force && open.kind === "query" && (open.tx === "open" || open.tx === "aborted")) {
+          set({
+            dialog: {
+              kind: "confirm",
+              title: `Close "${open.title}"?`,
+              body: "It has an open transaction: closing the tab rolls it back.",
+              action: "Close and roll back",
+              onConfirm: () => get().closeTab(id, true),
+            },
+          });
+          return;
+        }
         const tab = tabs[i];
         if (tab.kind === "query") {
           // a run still connecting just stops (runQuery sees the tab is gone)
@@ -358,8 +379,22 @@ export const useApp = create<State>()(
         set({ tabs: rest, activeTabId, closedTabs: [...get().closedTabs, closed].slice(-10) });
       },
 
-      closeTabs: (ids, keep) => {
-        for (const id of ids) get().closeTab(id);
+      closeTabs: (ids, keep, force = false) => {
+        const pending = get().tabs.filter((t) => ids.includes(t.id) && t.kind === "query" && (t.tx === "open" || t.tx === "aborted"));
+        if (!force && pending.length) {
+          const n = pending.length;
+          set({
+            dialog: {
+              kind: "confirm",
+              title: `Close ${ids.length} tab${ids.length === 1 ? "" : "s"}?`,
+              body: `${n} of them ${n === 1 ? "has an open transaction" : "have open transactions"}: closing rolls ${n === 1 ? "it" : "them"} back.`,
+              action: "Close and roll back",
+              onConfirm: () => get().closeTabs(ids, keep, true),
+            },
+          });
+          return;
+        }
+        for (const id of ids) get().closeTab(id, true);
         if (keep && get().tabs.some((t) => t.id === keep)) get().setActiveTab(keep);
       },
 
@@ -440,18 +475,39 @@ export const useApp = create<State>()(
           const withRows = output.results.map((r, i) => (r.hasRows ? i : -1)).filter((i) => i >= 0);
           const activeResult = withRows.length ? withRows.at(-1)! : Math.max(0, output.results.length - 1);
           get().updateTab(tabId, { running: undefined, output, activeResult });
+          void get().refreshTx(tabId);
           // DDL changes what the sidebar and autocomplete should show
           if (/\b(create|alter|drop|rename|truncate|comment)\b/i.test(sql)) void get().refreshSchema(connId);
         } catch (e) {
           if (!current()) return;
           const error = toAppError(e);
           get().updateTab(tabId, { running: undefined, error: { ...error, offset, sql } });
+          void get().refreshTx(tabId);
           if (error.code === "not_connected") {
             const sessions = { ...get().sessions };
             delete sessions[connId];
             set({ sessions });
           }
         }
+      },
+
+      refreshTx: async (tabId) => {
+        const tab = get().tabs.find((t) => t.id === tabId);
+        if (tab?.kind !== "query" || !tab.connId) return;
+        const tx = await api.transactionStatus(tab.connId, tabId).catch((): TxState => "unknown");
+        if (get().tabs.some((t) => t.id === tabId)) get().updateTab(tabId, { tx });
+      },
+
+      endTransaction: async (tabId, statement) => {
+        const tab = get().tabs.find((t) => t.id === tabId);
+        if (tab?.kind !== "query" || !tab.connId || tab.running) return;
+        try {
+          await api.run(tab.connId, newId(), statement, 1, tabId);
+          get().toast(statement === "COMMIT" ? "Committed" : "Rolled back");
+        } catch (e) {
+          get().toast(toAppError(e).message, "error");
+        }
+        await get().refreshTx(tabId);
       },
 
       cancelQuery: async (tabId) => {
@@ -496,7 +552,7 @@ export const useApp = create<State>()(
       partialize: (s) => ({
         settings: s.settings,
         tabs: s.tabs.map((t) =>
-          t.kind === "query" ? { ...t, running: undefined, output: undefined, error: undefined } : t,
+          t.kind === "query" ? { ...t, running: undefined, output: undefined, error: undefined, tx: undefined } : t,
         ),
         activeTabId: s.activeTabId,
         lastConnId: s.lastConnId,

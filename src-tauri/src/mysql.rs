@@ -345,6 +345,8 @@ pub struct MySession {
     index_expressions: bool,
     /// MySQL 8 caches table statistics in information_schema for a day by default.
     stats_expiry: bool,
+    /// How to ask whether a session is inside a transaction, when the server can say.
+    tx_probe: Option<&'static str>,
 }
 
 impl MySession {
@@ -424,6 +426,16 @@ impl MySession {
             (true, false) => Checks::BySchema,
             (true, true) => Checks::ByTable,
         };
+        // MariaDB keeps a flag; MySQL tells through performance_schema, when that is on
+        let tx_probe = if product(&server_version) == "MariaDB" {
+            Some("SELECT @@in_transaction")
+        } else {
+            let on: Option<i64> = conn.query_first("SELECT @@performance_schema").await.unwrap_or(None);
+            (on == Some(1)).then_some(
+                "SELECT COUNT(*) FROM performance_schema.events_transactions_current
+                 WHERE THREAD_ID = PS_CURRENT_THREAD_ID() AND STATE = 'ACTIVE' AND AUTOCOMMIT = 'NO'",
+            )
+        };
         let stats_expiry: Vec<mysql_async::Row> =
             conn.query("SHOW VARIABLES LIKE 'information_schema_stats_expiry'").await?;
         let _ = conn.disconnect().await;
@@ -449,6 +461,7 @@ impl MySession {
             checks,
             index_expressions: has("STATISTICS", "EXPRESSION"),
             stats_expiry: !stats_expiry.is_empty(),
+            tx_probe,
         })
     }
 }
@@ -526,6 +539,20 @@ impl MySession {
             Err(e) => Err(e.into()),
         };
         out.finish(outcome, user_cancelled, duration_ms)
+    }
+
+    pub async fn transaction_status(&self, tab: &str) -> AppResult<TxState> {
+        let Some(slot) = self.editors.lock().await.get(tab).cloned() else { return Ok(TxState::None) };
+        let mut conn = slot.lock().await;
+        if conn.is_disconnected() {
+            return Ok(TxState::None);
+        }
+        let Some(probe) = self.tx_probe else { return Ok(TxState::Unknown) };
+        Ok(match conn.query_first::<i64, _>(probe).await {
+            Ok(Some(n)) if n > 0 => TxState::Open,
+            Ok(Some(_)) => TxState::Idle,
+            _ => TxState::Unknown,
+        })
     }
 
     /// Closes a query tab's connection (the tab was closed).

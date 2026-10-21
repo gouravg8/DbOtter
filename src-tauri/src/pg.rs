@@ -341,6 +341,28 @@ impl PgSession {
     }
 
     /// Closes a query tab's connection (the tab was closed).
+    /// Asks the tab's own session. Inside a transaction now() is when it began, so it differs
+    /// from the time of this statement; outside one they are the same instant.
+    pub async fn transaction_status(&self, tab: &str) -> AppResult<TxState> {
+        let Some(slot) = self.editors.lock().await.get(tab).cloned() else { return Ok(TxState::None) };
+        let client = slot.lock().await;
+        if client.is_closed() {
+            return Ok(TxState::None);
+        }
+        Ok(match client.simple_query("SELECT now() <> statement_timestamp()").await {
+            Ok(rows) => match rows.iter().find_map(|m| match m {
+                SimpleQueryMessage::Row(r) => r.get(0).map(|v| v == "t"),
+                _ => None,
+            }) {
+                Some(true) => TxState::Open,
+                Some(false) => TxState::Idle,
+                None => TxState::Unknown,
+            },
+            Err(e) if e.code() == Some(&tokio_postgres::error::SqlState::IN_FAILED_SQL_TRANSACTION) => TxState::Aborted,
+            Err(_) => TxState::Unknown,
+        })
+    }
+
     pub async fn release_editor(&self, tab: &str) {
         *self.editor_gen.lock().unwrap().entry(tab.to_string()).or_default() += 1;
         self.editors.lock().await.remove(tab);

@@ -147,6 +147,12 @@ impl Db {
         }
     }
 
+    /// Whether a query tab's own session is inside a transaction.
+    pub async fn transaction_status(&self, conn_id: &str, tab: &str) -> AppResult<TxState> {
+        let session = self.session(conn_id).await?;
+        each!(&*session, s => s.transaction_status(tab).await)
+    }
+
     /// Returns false when the query already finished.
     pub async fn cancel(&self, query_id: &str) -> AppResult<bool> {
         self.running.cancel(query_id).await

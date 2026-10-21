@@ -226,6 +226,21 @@ pub struct ResultSet {
     pub truncated: bool,
 }
 
+/// Where a query tab's own session stands.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TxState {
+    /// The tab has no session of its own (nothing ran yet, or it was released).
+    None,
+    Idle,
+    /// Inside BEGIN … : changes wait for COMMIT.
+    Open,
+    /// Postgres: a statement failed inside the transaction; only ROLLBACK works now.
+    Aborted,
+    /// The server can't tell (MySQL without performance_schema).
+    Unknown,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryOutput {

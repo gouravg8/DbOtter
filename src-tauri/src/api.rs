@@ -153,6 +153,15 @@ impl App {
                 ok(self.db.table_count(&id, &query_id, &query).await?)
             }
             "run_query" => ok(self.run_query(args(a)?).await?),
+            "transaction_status" => {
+                #[derive(Deserialize)]
+                struct A {
+                    id: String,
+                    editor: String,
+                }
+                let A { id, editor } = args(a)?;
+                ok(self.db.transaction_status(&id, &editor).await?)
+            }
             "editor_release" => {
                 let EditorArgs { editor } = args(a)?;
                 self.db.release_editor(&editor).await;

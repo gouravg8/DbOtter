@@ -552,3 +552,28 @@ async fn read_only_connections() {
     }
     assert_eq!(cell(&run(&app, &id, "SELECT name FROM customers WHERE id = 1", None).await), "Customer 1");
 }
+
+/// The state of tab "t1"'s own session.
+async fn tx(app: &App, id: &str) -> Value {
+    call(app, "transaction_status", json!({ "id": id, "editor": "t1" })).await
+}
+
+#[tokio::test]
+async fn transaction_status_of_a_tab() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = saved(&app, port, "postgres").await;
+    call(&app, "connect", json!({ "id": id })).await;
+    assert_eq!(tx(&app, &id).await, "none");
+    run_in(&app, &id, "t1", "SELECT 1").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+    run_in(&app, &id, "t1", "BEGIN").await;
+    assert_eq!(tx(&app, &id).await, "open");
+    run_in(&app, &id, "t1", "COMMIT").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+    run_in(&app, &id, "t1", "BEGIN").await;
+    call_err(&app, "run_query", json!({ "id": id, "queryId": "x", "sql": "SELECT 1/0", "editor": "t1" })).await;
+    assert_eq!(tx(&app, &id).await, "aborted");
+    run_in(&app, &id, "t1", "ROLLBACK").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+}

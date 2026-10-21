@@ -392,3 +392,22 @@ async fn read_only_connections() {
         assert_eq!(err["code"], "read_only", "{sql}: {err}");
     }
 }
+
+/// The state of tab "t1"'s own session.
+async fn tx(app: &App, id: &str) -> Value {
+    call(app, "transaction_status", json!({ "id": id, "editor": "t1" })).await
+}
+
+#[tokio::test]
+async fn transaction_status_of_a_tab() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = connected(&app, port, "").await;
+    assert_eq!(tx(&app, &id).await, "none");
+    run_in(&app, &id, "t1", "SELECT 1").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+    run_in(&app, &id, "t1", "START TRANSACTION").await;
+    assert_eq!(tx(&app, &id).await, "open");
+    run_in(&app, &id, "t1", "COMMIT").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+}

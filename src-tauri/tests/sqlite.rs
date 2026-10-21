@@ -508,3 +508,21 @@ async fn read_only_connections() {
     }
     assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM customers", None).await), "4");
 }
+
+/// The state of tab "t1"'s own session.
+async fn tx(app: &App, id: &str) -> Value {
+    call(app, "transaction_status", json!({ "id": id, "editor": "t1" })).await
+}
+
+#[tokio::test]
+async fn transaction_status_of_a_tab() {
+    let app = app();
+    let id = connected(&app, &seeded()).await;
+    assert_eq!(tx(&app, &id).await, "none");
+    run_in(&app, &id, "t1", "SELECT 1").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+    run_in(&app, &id, "t1", "BEGIN").await;
+    assert_eq!(tx(&app, &id).await, "open");
+    run_in(&app, &id, "t1", "ROLLBACK").await;
+    assert_eq!(tx(&app, &id).await, "idle");
+}

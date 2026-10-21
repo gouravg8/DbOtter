@@ -126,6 +126,9 @@ export interface ResultSet {
   truncated: boolean;
 }
 
+/** A query tab's own session: none yet, idle, inside a transaction, or (Postgres) aborted. */
+export type TxState = "none" | "idle" | "open" | "aborted" | "unknown";
+
 export interface QueryOutput {
   results: ResultSet[];
   durationMs: number;
@@ -229,6 +232,7 @@ export const api = {
   run: (id: string, queryId: string, sql: string, maxRows?: number, editor?: string) =>
     call<QueryOutput>("run_query", { id, queryId, sql, maxRows, editor }),
   releaseEditor: (editor: string) => call<void>("editor_release", { editor }),
+  transactionStatus: (id: string, editor: string) => call<TxState>("transaction_status", { id, editor }),
   cancel: (queryId: string) => call<boolean>("cancel_query", { queryId }),
   history: (limit = 300) => call<HistoryEntry[]>("history_list", { limit }),
   clearHistory: () => call<void>("history_clear"),

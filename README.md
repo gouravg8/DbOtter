@@ -25,6 +25,7 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 - SSL (Postgres and MySQL): disable, prefer, require (encrypt without checking the certificate, like libpq), verify-full (system roots, or your own CA file, plus the host name)
 - A color per connection (e.g. red for production), shown in the sidebar, tabs and status bar
 - Read-only connections: the database itself refuses writes (Postgres read-only transactions, MySQL `TRANSACTION READ ONLY`, SQLite opened read-only)
+- Query tabs show an open (or, in Postgres, aborted) transaction with Commit and Rollback buttons; closing such a tab or switching its connection asks first, since that rolls it back
 - Production connections: before `UPDATE` / `DELETE` without `WHERE`, `DROP`, `TRUNCATE` or `ALTER … DROP` runs, a confirmation lists those statements (Cancel is the default)
 
 **Browse**
