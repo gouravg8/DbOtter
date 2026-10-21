@@ -1,29 +1,39 @@
 # DbOtter
 
-A fast, keyboard-first PostgreSQL client. **v0.0.1**
+A fast, keyboard-first database client for **PostgreSQL**, **MySQL / MariaDB** and
+**SQLite**. **v0.0.1**
 
 Tauri v2 + Rust backend, React + CodeMirror 6 frontend. It uses the operating system's own
 webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 
 ## Features (v0.0.1)
 
+**Databases**
+- PostgreSQL (10 and newer), MySQL / MariaDB, and SQLite files, all with the same features
+  below: browsing, structure, the editor, per-tab sessions, limits, cancel and history
+- Each MySQL database shows as a schema in the tree; a SQLite file shows `main` and any
+  attached databases
+- SQLite opens existing files only (a typo in the path never creates an empty database)
+
 **Connections**
-- Add, edit and delete connections, or paste a `postgres://user:pass@host:5432/db?sslmode=…` URL to fill the form
+- Add, edit and delete connections, or paste a URL to fill the form: `postgres://…`,
+  `mysql://…` / `mariadb://…` (`?sslmode=` or `?ssl-mode=`), `sqlite:///path/to/file.db`
+  or just the path of a `.db` / `.sqlite` file
 - Passwords live in the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service / GNOME Keyring on Linux), never in a file
 - Not saving the password? You're asked when connecting, and it's kept in memory for the session only
 - Test connection (server version and latency)
-- SSL: disable, prefer, require (encrypt without checking the certificate, like libpq), verify-full (system roots, or your own CA file, plus the host name)
+- SSL (Postgres and MySQL): disable, prefer, require (encrypt without checking the certificate, like libpq), verify-full (system roots, or your own CA file, plus the host name)
 - A color per connection (e.g. red for production), shown in the sidebar, tabs and status bar
 
 **Browse**
-- Sidebar tree: schemas, then tables, views and materialized views, with row estimates; fuzzy search (`/`)
+- Sidebar tree: schemas (MySQL: databases), then tables, views and materialized views, with row estimates; fuzzy search (`/`)
 - Table data: pages of 100 rows by default (50 to 5,000 in Settings), sort by clicking a header, filters (column, operator, value) plus a raw `WHERE` condition, exact count on demand
 - Structure: columns (type, nullable, default, primary key, comment), indexes with definitions and sizes, constraints, view definitions, table size
 
 **Query**
-- SQL editor: Postgres highlighting, autocomplete for keywords, schemas, tables and columns
+- SQL editor: highlighting and keywords for the connection's dialect (PostgreSQL, MySQL, MariaDB, SQLite), autocomplete for schemas, tables and columns
 - `Ctrl/⌘ Enter` runs the selection or the statement under the cursor; `Ctrl/⌘ Shift Enter` runs everything
-- Several statements: one result per statement; row count and timing; errors show the Postgres message, detail, hint and SQLSTATE, and underline the failing token
+- Several statements: one result per statement; row count and timing; errors show the database's message, detail, hint and code (SQLSTATE for Postgres), and underline the failing token
 - Each query tab has its own database session: `BEGIN`, `UPDATE`, `COMMIT` run one at a time stay in one transaction, and `SET` or temp tables persist in that tab. Browsing tables uses a separate small pool, so an open transaction never leaks into it
 - Results keep at most 5,000 rows (Settings) and 64 MB; the rest is read and dropped so the statement and the ones after it still finish. Queries can be cancelled at any point
 - Query history, searchable, reopen any query in a new tab
@@ -121,15 +131,21 @@ pnpm dev:browser                    # terminal 2, then open http://localhost:142
 scripts/test-db.sh start            # throwaway Postgres on 127.0.0.1:55432 with seeded data
 export DBOTTER_TEST_PORT=55432
 export DBOTTER_TEST_CA=$PWD/.test-db/ca.crt   # TLS tests (the script enables TLS when openssl exists)
+scripts/test-mysql.sh start         # throwaway MySQL / MariaDB on 127.0.0.1:33306
+export DBOTTER_TEST_MYSQL_PORT=33306
 
 pnpm test:unit                      # SQL splitter, themes, formats (node --test)
 pnpm test:rust                      # Rust unit + integration tests against the test database
 pnpm exec playwright install chromium
 pnpm test:e2e                       # the real UI in Chromium + real backend via the bridge
-scripts/test-db.sh stop
+scripts/test-db.sh stop; scripts/test-mysql.sh stop
 ```
 
-The integration tests cover password prompts, the keychain (under a separate
+SQLite needs no server: its tests make their own files. Without the environment variables,
+the Postgres and MySQL tests are skipped.
+
+Each engine has its own integration tests (`src-tauri/tests/postgres.rs`, `mysql.rs`,
+`sqlite.rs`). They cover password prompts, the keychain (under a separate
 "DbOtter (tests)" service, cleaned up afterwards), every SSL mode against a TLS server (including
 verify-full with a custom CA), per-tab sessions and transactions, schema and structure
 introspection (generated columns, partitioned tables), filters with quotes, wildcards and json,
@@ -144,15 +160,20 @@ restart, sessions (disconnect, editing an open connection), and deleting connect
 ```
 src-tauri/src/
   api.rs       every command the UI can call (one dispatch entry point)
-  db.rs        connection pools, queries, cancel, TLS, schema and structure introspection
-  sql.rs       SQL for table browsing (quoting, filters)
+  db.rs        open connections by id; dispatches to the engine, table paging and counts
+  pg.rs        PostgreSQL engine (pools, per-tab sessions, TLS, introspection)
+  mysql.rs     MySQL / MariaDB engine
+  sqlite.rs    SQLite engine
+  results.rs   collecting results: row and byte limits, cancel past the limit
+  running.rs   queries in flight and how to cancel them on each engine
+  sql.rs       SQL for table browsing per dialect (quoting, filters)
   store.rs     connections.json and history.jsonl
   secrets.rs   OS keychain
 src/
   lib/         api client, app store, themes, SQL statement splitter, formatting
   components/  sidebar, tabs, SQL editor, data grid, dialogs, palette, settings
 e2e/           Playwright tests
-scripts/       test database
+scripts/       test databases (Postgres, MySQL)
 ```
 
 ## Roadmap: v0.0.2
