@@ -577,3 +577,100 @@ async fn transaction_status_of_a_tab() {
     run_in(&app, &id, "t1", "ROLLBACK").await;
     assert_eq!(tx(&app, &id).await, "idle");
 }
+
+fn export_dir() -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("dbotter-export-it-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+async fn export(app: &App, id: &str, source: Value, format: &str, path: &std::path::Path, extra: Value) -> Result<Value, Value> {
+    let mut args = json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "source": source,
+                           "format": format, "path": path });
+    args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    app.dispatch("export", args).await.map_err(|e| serde_json::to_value(e).unwrap())
+}
+
+#[tokio::test]
+async fn export_tables_and_queries() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = saved(&app, port, "postgres").await;
+    call(&app, "connect", json!({ "id": id })).await;
+    let dir = export_dir();
+
+    // every row, past the 5,000-row result limit, with the tab's filter and sort
+    let csv = dir.join("orders.csv");
+    let table = json!({ "kind": "table", "query": { "schema": "sales", "table": "orders", "limit": 100, "offset": 300,
+        "whereRaw": "id <= 20000", "sort": { "column": "id", "desc": true } } });
+    let out = export(&app, &id, table.clone(), "csv", &csv, json!({})).await.unwrap();
+    assert_eq!(out["rows"], 20000);
+    let text = std::fs::read_to_string(&csv).unwrap();
+    // records, not lines: some notes hold newlines (quoted)
+    let records = text.chars().fold((0, false), |(n, quoted), c| match c {
+        '"' => (n, !quoted),
+        '\n' if !quoted => (n + 1, quoted),
+        _ => (n, quoted),
+    });
+    assert_eq!(records, (20001, false));
+    assert!(text.starts_with("id,"), "{}", &text[..40]);
+    assert!(text.lines().nth(1).unwrap().starts_with("20000,"));
+    assert_eq!(out["bytes"], text.len());
+
+    // an existing file needs overwrite
+    let err = export(&app, &id, table.clone(), "csv", &csv, json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "exists", "{err}");
+    export(&app, &id, table, "csv", &csv, json!({ "overwrite": true })).await.unwrap();
+
+    // a query to JSON
+    let path = dir.join("q.json");
+    let source = json!({ "kind": "sql", "sql": "SELECT id, name, email FROM customers WHERE id IN (1, 2501) ORDER BY id;" });
+    export(&app, &id, source, "json", &path, json!({})).await.unwrap();
+    let rows: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(rows, json!([
+        { "id": "1", "name": "Customer 1", "email": "c1@example.com" },
+        { "id": "2501", "name": "O'Brien \"the 50%_off\" guy", "email": "ob@example.com" },
+    ]));
+
+    // SQL INSERTs load back into a copy of the table, every column the same
+    let path = dir.join("customers.sql");
+    let source = json!({ "kind": "table", "query": { "schema": "public", "table": "customers", "limit": 100, "offset": 0,
+        "whereRaw": "id <= 3 OR id = 2501" } });
+    let out = export(&app, &id, source, "sql", &path, json!({ "target": "customers_copy" })).await.unwrap();
+    assert_eq!(out["rows"], 4);
+    run(&app, &id, "DROP TABLE IF EXISTS customers_copy; CREATE TABLE customers_copy (LIKE customers)", None).await;
+    run(&app, &id, &std::fs::read_to_string(&path).unwrap(), None).await;
+    let diff = run(&app, &id, "SELECT count(*) FROM ((SELECT * FROM customers WHERE id <= 3 OR id = 2501) \
+        EXCEPT (SELECT * FROM customers_copy)) d", None).await;
+    let copied = run(&app, &id, "SELECT count(*) FROM customers_copy", None).await;
+    run(&app, &id, "DROP TABLE customers_copy", None).await;
+    assert_eq!((cell(&diff), cell(&copied)), (json!("0"), json!("4")));
+
+    // queries that write, or several statements, are refused before a file is made
+    let bad = dir.join("bad.csv");
+    let err = export(&app, &id, json!({ "kind": "sql", "sql": "DELETE FROM customers RETURNING *" }), "csv", &bad, json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "not_read_only", "{err}");
+    let err = export(&app, &id, json!({ "kind": "sql", "sql": "SELECT 1; SELECT 2" }), "csv", &bad, json!({})).await.unwrap_err();
+    assert!(err["message"].as_str().unwrap().contains("one statement"), "{err}");
+    let err = export(&app, &id, json!({ "kind": "sql", "sql": "SELECT nope FROM customers" }), "csv", &bad, json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "42703");
+    let err = export(&app, &id, json!({ "kind": "table", "query": { "schema": "public", "table": "customers", "limit": 1,
+        "offset": 0, "whereRaw": "true); DELETE FROM customers; SELECT (1" } }), "csv", &bad, json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "42601", "{err}");
+
+    // cancelled like a query: nothing is left behind
+    let app = std::sync::Arc::new(app);
+    let (a, i, p) = (app.clone(), id.clone(), bad.clone());
+    let running = tokio::spawn(async move {
+        a.dispatch("export", json!({ "id": i, "queryId": "exp", "format": "csv", "path": p,
+            "source": { "kind": "sql", "sql": "SELECT * FROM sales.orders CROSS JOIN generate_series(1, 5)" } })).await
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(call(&app, "cancel_query", json!({ "queryId": "exp" })).await, true);
+    let err = serde_json::to_value(running.await.unwrap().unwrap_err()).unwrap();
+    assert_eq!(err["code"], "57014", "{err}");
+    let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into()).collect();
+    left.sort();
+    assert_eq!(left, ["customers.sql", "orders.csv", "q.json"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}

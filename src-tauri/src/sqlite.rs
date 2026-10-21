@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::error::{AppError, AppResult};
 use crate::model::*;
-use crate::results::{Collector, canceled, hex};
+use crate::results::{Literal, Ran, Sink, canceled, hex};
 use crate::running::{Canceler, Running};
 use crate::sql::Dialect;
 
@@ -185,8 +185,8 @@ fn text(v: ValueRef<'_>) -> Option<String> {
     }
 }
 
-/// Runs each statement of `sql` in order, rows into the collector.
-fn run_batch(db: &Connection, sql: &str, single_statement: bool, out: &mut Collector) -> AppResult<()> {
+/// Runs each statement of `sql` in order, rows into `out`.
+fn run_batch(db: &Connection, sql: &str, single_statement: bool, out: &mut impl Sink) -> AppResult<()> {
     // SQL that includes the user's WHERE text must be one statement, so `true); DELETE …`
     // can't sneak in whatever the quoting
     if single_statement {
@@ -212,10 +212,24 @@ fn run_batch(db: &Connection, sql: &str, single_statement: bool, out: &mut Colle
         out.columns(stmt.column_names().into_iter().map(str::to_string).collect());
         let mut rows = stmt.raw_query();
         let mut count = 0;
+        // values have a type each, not per column
+        let mut forms = Vec::with_capacity(width);
         while let Some(row) = rows.next()? {
             count += 1;
             if out.wants_row() {
-                out.row((0..width).map(|i| row.get_ref(i).map(text)).collect::<Result<_, _>>()?);
+                forms.clear();
+                let cells = (0..width)
+                    .map(|i| {
+                        let v = row.get_ref(i)?;
+                        forms.push(match v {
+                            ValueRef::Integer(_) | ValueRef::Real(_) => Literal::Number,
+                            ValueRef::Blob(_) => Literal::Hex,
+                            _ => Literal::Text,
+                        });
+                        Ok(text(v))
+                    })
+                    .collect::<Result<_, rusqlite::Error>>()?;
+                out.row_with(cells, &forms);
             }
         }
         // the full count, also past the row limit
@@ -632,15 +646,15 @@ impl LiteSession {
 
     /// Runs `sql` (one or more statements). With `editor` (a query tab id) it runs on that
     /// tab's own connection, otherwise on the shared one.
-    pub async fn run(
+    pub async fn run<S: Sink>(
         &self,
         running: &Running,
         query_id: &str,
         sql: &str,
-        max_rows: usize,
+        mut out: S,
         editor: Option<&str>,
         single_statement: bool,
-    ) -> AppResult<QueryOutput> {
+    ) -> AppResult<Ran<S>> {
         let conn = match editor {
             Some(tab) => self.editor(tab).await,
             None => Ok(self.shared.clone()),
@@ -661,16 +675,15 @@ impl LiteSession {
         running.attach(query_id, Canceler::Sqlite(interrupt)).await?;
         let started = Instant::now();
         let sql = sql.to_string();
-        let mut out = Collector::new(max_rows);
-        let (out, outcome) = tokio::task::spawn_blocking(move || {
+        let joined = tokio::task::spawn_blocking(move || {
             let outcome = run_batch(&db, &sql, single_statement, &mut out);
             (out, outcome)
         })
-        .await
-        .unwrap_or_else(|e| (Collector::new(max_rows), Err(AppError::new(format!("SQLite task failed: {e}")))));
+        .await;
         let duration_ms = started.elapsed().as_millis() as u64;
         let user_cancelled = running.end(query_id).await;
-        out.finish(outcome, user_cancelled, duration_ms)
+        let (sink, outcome) = joined.map_err(|e| AppError::new(format!("SQLite task failed: {e}")))?;
+        Ok(Ran { sink, outcome, user_cancelled, duration_ms })
     }
 
     pub async fn transaction_status(&self, tab: &str) -> AppResult<TxState> {

@@ -411,3 +411,51 @@ async fn transaction_status_of_a_tab() {
     run_in(&app, &id, "t1", "COMMIT").await;
     assert_eq!(tx(&app, &id).await, "idle");
 }
+
+async fn export(app: &App, id: &str, source: Value, format: &str, path: &std::path::Path, extra: Value) -> Result<Value, Value> {
+    let mut args = json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "source": source,
+                           "format": format, "path": path });
+    args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    app.dispatch("export", args).await.map_err(|e| serde_json::to_value(e).unwrap())
+}
+
+#[tokio::test]
+async fn export_tables_and_queries() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = connected(&app, port, "").await;
+    shop(&app, &id, "export_shop").await;
+    let dir = std::env::temp_dir().join(format!("dbotter-export-it-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // a filtered table past the result limit
+    let csv = dir.join("orders.csv");
+    let table = json!({ "kind": "table", "query": { "schema": "export_shop", "table": "orders", "limit": 100, "offset": 0,
+        "whereRaw": "status = 'paid'" } });
+    let out = export(&app, &id, table, "csv", &csv, json!({})).await.unwrap();
+    assert_eq!(out["rows"], 25000);
+    assert!(std::fs::read_to_string(&csv).unwrap().starts_with("id,customer_id,amount,vat,status,note\n"));
+
+    // SQL INSERTs load back: BLOB and BIT values included
+    let sql = dir.join("customers.sql");
+    let table = json!({ "kind": "table", "query": { "schema": "export_shop", "table": "customers", "limit": 100, "offset": 0 } });
+    export(&app, &id, table, "sql", &sql, json!({ "target": "customers_copy" })).await.unwrap();
+    run(&app, &id, "USE export_shop; CREATE TABLE customers_copy LIKE customers", None).await;
+    run(&app, &id, &format!("USE export_shop; {}", std::fs::read_to_string(&sql).unwrap()), None).await;
+    let diff = run(&app, &id, "SELECT count(*) FROM export_shop.customers c LEFT JOIN export_shop.customers_copy k \
+        ON k.id = c.id AND k.name = c.name AND k.email <=> c.email AND k.country <=> c.country AND k.meta <=> c.meta \
+        AND k.avatar <=> c.avatar AND k.flags <=> c.flags AND k.created_at = c.created_at WHERE k.id IS NULL", None).await;
+    assert_eq!(cell(&diff), json!("0"));
+
+    // a query: one statement that reads
+    let path = dir.join("q.json");
+    let source = json!({ "kind": "sql", "sql": "SELECT name, flags FROM export_shop.customers WHERE id = 1 # first" });
+    export(&app, &id, source, "json", &path, json!({})).await.unwrap();
+    let rows: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(rows, json!([{ "name": "Ada", "flags": "101" }]));
+    let err = export(&app, &id, json!({ "kind": "sql", "sql": "SELECT * FROM export_shop.customers INTO OUTFILE '/tmp/x'" }),
+        "csv", &dir.join("x.csv"), json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "not_read_only");
+    run(&app, &id, "DROP DATABASE export_shop", None).await;
+    std::fs::remove_dir_all(dir).unwrap();
+}

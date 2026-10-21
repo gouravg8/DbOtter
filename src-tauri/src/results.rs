@@ -3,7 +3,7 @@
 //! stored, so the statement, and any after it, still run to completion (stopping early would
 //! abort a transaction and skip later statements).
 
-use crate::error::AppError;
+use crate::error::{AppError, AppResult};
 use crate::model::{QueryOutput, ResultSet};
 
 /// Result memory cap per run, on top of the row limit (wide rows, huge values).
@@ -13,6 +13,44 @@ pub const CANCELED: &str = "57014";
 
 pub fn canceled() -> AppError {
     AppError::new("canceling statement due to user request").with_code(CANCELED)
+}
+
+/// Where an engine puts the rows of a run: the [`Collector`] for the UI, or an export file.
+pub trait Sink: Send + 'static {
+    /// A statement that returns rows starts.
+    fn columns(&mut self, columns: Vec<String>);
+    /// Whether the next row would be kept; check before converting a row to text.
+    fn wants_row(&self) -> bool;
+    fn row(&mut self, cells: Vec<Option<String>>);
+    /// A row whose text isn't how SQL would write some of its values (`\\x…` hex for binary,
+    /// MySQL bits, SQLite numbers): `forms` says, per cell, for a SQL export.
+    fn row_with(&mut self, cells: Vec<Option<String>>, _forms: &[Literal]) {
+        self.row(cells)
+    }
+    /// The statement finished: `row_count` rows returned or affected.
+    fn complete(&mut self, row_count: u64);
+}
+
+/// How a cell's text is written back as a SQL value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Literal {
+    /// A quoted string (the server converts it to the column's type).
+    Text,
+    /// Bare, so a column without a type (SQLite) keeps it a number.
+    Number,
+    /// `\x…` text of binary data: `X'…'`.
+    Hex,
+    /// MySQL BIT as `101`: `b'101'`.
+    Bits,
+}
+
+/// A run the engine finished, with the sink handed back. Errors from before the run started
+/// (no connection) come back as `Err` instead, the sink dropped.
+pub struct Ran<S> {
+    pub sink: S,
+    pub outcome: AppResult<()>,
+    pub user_cancelled: bool,
+    pub duration_ms: u64,
 }
 
 pub struct Collector {
@@ -25,38 +63,6 @@ pub struct Collector {
 impl Collector {
     pub fn new(max_rows: usize) -> Self {
         Self { max_rows: max_rows.max(1), bytes: 0, results: Vec::new(), current: None }
-    }
-
-    /// A statement that returns rows starts.
-    pub fn columns(&mut self, columns: Vec<String>) {
-        self.current = Some(ResultSet { columns, has_rows: true, ..Default::default() });
-    }
-
-    /// Whether the next row would be kept; check before converting a row to text.
-    pub fn wants_row(&self) -> bool {
-        self.current.as_ref().is_none_or(|c| !c.truncated)
-    }
-
-    pub fn row(&mut self, cells: Vec<Option<String>>) {
-        let set = self.current.get_or_insert_with(|| ResultSet { has_rows: true, ..Default::default() });
-        if set.truncated {
-            return;
-        }
-        let size: usize = cells.iter().map(|c| c.as_ref().map_or(0, String::len) + 16).sum();
-        if set.rows.len() >= self.max_rows || self.bytes + size > MAX_RESULT_BYTES {
-            set.truncated = true;
-            return;
-        }
-        self.bytes += size;
-        set.rows.push(cells);
-    }
-
-    /// The statement finished: `row_count` rows returned or affected (for a truncated result
-    /// the full count, more than the rows kept).
-    pub fn complete(&mut self, row_count: u64) {
-        let mut set = self.current.take().unwrap_or_default();
-        set.row_count = row_count;
-        self.results.push(set);
     }
 
     /// A statement that returned rows finished without a count from the server.
@@ -94,6 +100,37 @@ impl Collector {
                 if keep { Ok(QueryOutput { results: self.results, duration_ms, canceled: true }) } else { Err(e) }
             }
         }
+    }
+}
+
+impl Sink for Collector {
+    fn columns(&mut self, columns: Vec<String>) {
+        self.current = Some(ResultSet { columns, has_rows: true, ..Default::default() });
+    }
+
+    fn wants_row(&self) -> bool {
+        self.current.as_ref().is_none_or(|c| !c.truncated)
+    }
+
+    fn row(&mut self, cells: Vec<Option<String>>) {
+        let set = self.current.get_or_insert_with(|| ResultSet { has_rows: true, ..Default::default() });
+        if set.truncated {
+            return;
+        }
+        let size: usize = cells.iter().map(|c| c.as_ref().map_or(0, String::len) + 16).sum();
+        if set.rows.len() >= self.max_rows || self.bytes + size > MAX_RESULT_BYTES {
+            set.truncated = true;
+            return;
+        }
+        self.bytes += size;
+        set.rows.push(cells);
+    }
+
+    // for a truncated result the full count, more than the rows kept
+    fn complete(&mut self, row_count: u64) {
+        let mut set = self.current.take().unwrap_or_default();
+        set.row_count = row_count;
+        self.results.push(set);
     }
 }
 

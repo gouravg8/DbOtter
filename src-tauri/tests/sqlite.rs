@@ -526,3 +526,50 @@ async fn transaction_status_of_a_tab() {
     run_in(&app, &id, "t1", "ROLLBACK").await;
     assert_eq!(tx(&app, &id).await, "idle");
 }
+
+async fn export(app: &App, id: &str, source: Value, format: &str, path: &Path, extra: Value) -> Result<Value, Value> {
+    let mut args = json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "source": source,
+                           "format": format, "path": path });
+    args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    app.dispatch("export", args).await.map_err(|e| serde_json::to_value(e).unwrap())
+}
+
+#[tokio::test]
+async fn export_tables_and_queries() {
+    let app = app();
+    let id = connected(&app, &seeded()).await;
+    let dir = std::env::temp_dir().join(format!("dbotter-export-it-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // all 50,000 rows, sorted, past the 5,000-row result limit
+    let csv = dir.join("orders.csv");
+    let table = json!({ "kind": "table", "query": { "schema": "main", "table": "orders", "limit": 100, "offset": 0,
+        "sort": { "column": "id", "desc": true } } });
+    let out = export(&app, &id, table, "csv", &csv, json!({})).await.unwrap();
+    assert_eq!(out["rows"], 50000);
+    let text = std::fs::read_to_string(&csv).unwrap();
+    assert_eq!(text.lines().count(), 50001);
+    assert!(text.lines().nth(1).unwrap().starts_with("50000,"), "{}", text.lines().nth(1).unwrap());
+
+    // SQL INSERTs load back: blobs stay blobs, numbers stay numbers, NULLs stay NULL
+    let sql = dir.join("customers.sql");
+    let table = json!({ "kind": "table", "query": { "schema": "main", "table": "customers", "limit": 100, "offset": 0 } });
+    export(&app, &id, table, "sql", &sql, json!({ "target": "copy" })).await.unwrap();
+    run(&app, &id, "CREATE TABLE copy(id, name, country, score, avatar, created)", None).await;
+    run(&app, &id, &std::fs::read_to_string(&sql).unwrap(), None).await;
+    let same = "SELECT count(*) FROM (SELECT id, name, country, score, avatar, created, typeof(id), typeof(score), typeof(avatar) \
+        FROM customers EXCEPT SELECT id, name, country, score, avatar, created, typeof(id), typeof(score), typeof(avatar) FROM copy)";
+    assert_eq!(cell(&run(&app, &id, same, None).await), json!("0"));
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM copy", None).await), json!("4"));
+
+    // a query to JSON; writes are refused
+    let path = dir.join("q.json");
+    let source = json!({ "kind": "sql", "sql": "SELECT name, avatar FROM customers WHERE id = 1" });
+    export(&app, &id, source, "json", &path, json!({})).await.unwrap();
+    let rows: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(rows, json!([{ "name": "Ada", "avatar": "\\xdead01" }]));
+    let err = export(&app, &id, json!({ "kind": "sql", "sql": "DELETE FROM log" }), "csv", &dir.join("x.csv"), json!({})).await.unwrap_err();
+    assert_eq!(err["code"], "not_read_only");
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM log", None).await), json!("2"));
+    std::fs::remove_dir_all(dir).unwrap();
+}

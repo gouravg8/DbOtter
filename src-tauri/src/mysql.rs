@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::error::{AppError, AppResult};
 use crate::model::*;
-use crate::results::{Collector, canceled, hex};
+use crate::results::{Literal, Ran, Sink, canceled, hex};
 use crate::running::{Canceler, Running};
 use crate::sql::Dialect;
 
@@ -196,7 +196,7 @@ fn cell(value: Value, kind: CellKind) -> Option<String> {
 /// Runs `sql` with the text protocol and feeds every result into the collector: one per
 /// statement, rows or an affected-row count. Returns whether every statement returned rows
 /// (nothing was written).
-async fn collect_results(conn: &mut Conn, sql: &str, out: &mut Collector) -> Result<bool, mysql_async::Error> {
+async fn collect_results(conn: &mut Conn, sql: &str, out: &mut impl Sink) -> Result<bool, mysql_async::Error> {
     let mut result = conn.query_iter(sql).await?;
     let mut only_rows = true;
     loop {
@@ -204,13 +204,21 @@ async fn collect_results(conn: &mut Conn, sql: &str, out: &mut Collector) -> Res
             Some(columns) if !columns.is_empty() => {
                 out.columns(columns.iter().map(|c| c.name_str().into_owned()).collect());
                 let kinds: Vec<CellKind> = columns.iter().map(cell_kind).collect();
+                let forms: Vec<Literal> = kinds
+                    .iter()
+                    .map(|k| match k {
+                        CellKind::Text => Literal::Text,
+                        CellKind::Binary => Literal::Hex,
+                        CellKind::Bits(_) => Literal::Bits,
+                    })
+                    .collect();
                 let mut count = 0u64;
                 // rows past the limit are read and dropped, so the full count is known and
                 // later statements run; at the end of the set this moves on to the next one
                 while let Some(row) = result.next().await? {
                     count += 1;
                     if out.wants_row() {
-                        out.row(row.unwrap().into_iter().zip(&kinds).map(|(v, k)| cell(v, *k)).collect());
+                        out.row_with(row.unwrap().into_iter().zip(&kinds).map(|(v, k)| cell(v, *k)).collect(), &forms);
                     }
                 }
                 out.complete(count);
@@ -484,15 +492,15 @@ impl MySession {
     /// Runs `sql` (one or more statements) with the text protocol, so every value arrives as
     /// MySQL's own text output. With `editor` (a query tab id) it runs on that tab's own
     /// connection, otherwise on a pooled one.
-    pub async fn run(
+    pub async fn run<S: Sink>(
         &self,
         running: &Running,
         query_id: &str,
         sql: &str,
-        max_rows: usize,
+        mut out: S,
         editor: Option<&str>,
         single_statement: bool,
-    ) -> AppResult<QueryOutput> {
+    ) -> AppResult<Ran<S>> {
         let conn = match editor {
             Some(tab) => self.editor(tab).await.map(MyConn::Editor),
             None => self.pooled().await.map(MyConn::Pooled),
@@ -507,7 +515,6 @@ impl MySession {
         let canceler = Canceler::Mysql { pool: self.pool.clone(), connection_id: conn.conn().id() };
         running.attach(query_id, canceler).await?;
         let started = Instant::now();
-        let mut out = Collector::new(max_rows);
         // the statement check runs after the cancel handle is registered, as preparing can
         // wait on table locks
         let outcome = match single_statement {
@@ -538,7 +545,7 @@ impl MySession {
             ),
             Err(e) => Err(e.into()),
         };
-        out.finish(outcome, user_cancelled, duration_ms)
+        Ok(Ran { sink: out, outcome, user_cancelled, duration_ms })
     }
 
     pub async fn transaction_status(&self, tab: &str) -> AppResult<TxState> {

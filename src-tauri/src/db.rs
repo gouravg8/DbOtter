@@ -8,9 +8,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::error::{AppError, AppResult};
+use crate::export::{ExportFormat, ExportResult, ExportSink};
 use crate::model::*;
 use crate::mysql::MySession;
 use crate::pg::PgSession;
+use crate::results::{Collector, Ran, Sink};
 use crate::running::Running;
 use crate::sqlite::LiteSession;
 
@@ -128,6 +130,20 @@ impl Db {
         editor: Option<&str>,
         single_statement: bool,
     ) -> AppResult<QueryOutput> {
+        let ran = self.run_into(conn_id, query_id, sql, Collector::new(max_rows), editor, single_statement).await?;
+        ran.sink.finish(ran.outcome, ran.user_cancelled, ran.duration_ms)
+    }
+
+    /// [`Db::run`] with the rows going to `sink`.
+    async fn run_into<S: Sink>(
+        &self,
+        conn_id: &str,
+        query_id: &str,
+        sql: &str,
+        sink: S,
+        editor: Option<&str>,
+        single_statement: bool,
+    ) -> AppResult<Ran<S>> {
         let session = self.session(conn_id).await?;
         if session.info().read_only && reenables_writes(sql) {
             return Err(AppError::new("This connection is read-only: statements that turn writing back on are refused")
@@ -136,7 +152,40 @@ impl Db {
         // registered before waiting for a connection, so a cancel in the meantime counts
         self.running.begin(query_id).await;
         let r = &self.running;
-        each!(&*session, s => s.run(r, query_id, sql, max_rows, editor, single_statement).await)
+        each!(&*session, s => s.run(r, query_id, sql, sink, editor, single_statement).await)
+    }
+
+    /// Writes every row of a table (with the tab's filters and sort, not just the page shown)
+    /// or of a query that only reads to a file, streamed. Cancel it like a query, by
+    /// `query_id`. A query from a query tab runs on that tab's connection (`editor`), so it
+    /// sees what the tab's open transaction sees.
+    pub async fn export(
+        &self,
+        conn_id: &str,
+        query_id: &str,
+        source: &ExportSource,
+        file: ExportFile,
+        editor: Option<&str>,
+    ) -> AppResult<ExportResult> {
+        let session = self.session(conn_id).await?;
+        let dialect = session.info().kind.dialect();
+        let (sql, single_statement, default_target) = match source {
+            ExportSource::Table { query: q } => {
+                // looked up fresh: a stale key would fail the export after the file was opened
+                each!(&*session, s => s.forget_primary_key(&q.schema, &q.table).await);
+                let order = match q.sort {
+                    None => each!(&*session, s => s.primary_key(&q.schema, &q.table).await)?,
+                    Some(_) => vec![],
+                };
+                let raw = q.where_raw.as_deref().is_some_and(|w| !w.trim().is_empty());
+                (crate::sql::table_export(dialect, q, &order)?, raw, q.table.clone())
+            }
+            ExportSource::Sql { sql } => (crate::sql::read_query(dialect, sql)?.to_string(), true, "query_result".into()),
+        };
+        let target = file.target.as_deref().map(str::trim).filter(|t| !t.is_empty()).unwrap_or(&default_target);
+        let sink = ExportSink::create(file.path, file.format, dialect, target, file.overwrite)?;
+        let ran = self.run_into(conn_id, query_id, &sql, sink, editor, single_statement).await?;
+        ran.sink.finish(ran.outcome, ran.duration_ms)
     }
 
     /// Closes a query tab's own connection (the tab was closed or changed connection).
@@ -202,6 +251,22 @@ impl Db {
             .and_then(|v| v.parse().ok())
             .ok_or_else(|| AppError::new("Count returned no rows"))
     }
+}
+
+/// What to export.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ExportSource {
+    Table { query: TableQuery },
+    Sql { sql: String },
+}
+
+pub struct ExportFile {
+    pub path: std::path::PathBuf,
+    pub format: ExportFormat,
+    pub overwrite: bool,
+    /// Table name for SQL INSERTs (default: the table exported, or `query_result`).
+    pub target: Option<String>,
 }
 
 #[cfg(test)]

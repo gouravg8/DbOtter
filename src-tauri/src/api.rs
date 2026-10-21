@@ -10,8 +10,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
-use crate::db::Db;
+use crate::db::{Db, ExportFile, ExportSource};
 use crate::error::{AppError, AppResult};
+use crate::export::ExportFormat;
 use crate::model::*;
 use crate::secrets::Secrets;
 use crate::store::Store;
@@ -84,6 +85,23 @@ struct RunArgs {
     sql: String,
     max_rows: Option<usize>,
     /// Query tab id: runs on that tab's own connection (transactions, SET… persist).
+    editor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportArgs {
+    id: String,
+    query_id: String,
+    source: ExportSource,
+    format: ExportFormat,
+    /// Absolute, or starting with `~/`.
+    path: String,
+    /// Replace an existing file; without it that is an error with code `exists`.
+    #[serde(default)]
+    overwrite: bool,
+    target: Option<String>,
+    /// Query tab id, to run on the tab's own connection.
     editor: Option<String>,
 }
 
@@ -162,6 +180,17 @@ impl App {
                 let A { id, editor } = args(a)?;
                 ok(self.db.transaction_status(&id, &editor).await?)
             }
+            "export" => {
+                let a: ExportArgs = args(a)?;
+                let file = ExportFile {
+                    path: crate::export::resolve_path(&a.path)?,
+                    format: a.format,
+                    overwrite: a.overwrite,
+                    target: a.target,
+                };
+                ok(self.db.export(&a.id, &a.query_id, &a.source, file, a.editor.as_deref()).await?)
+            }
+            "export_dir" => ok(crate::export::default_dir().display().to_string()),
             "editor_release" => {
                 let EditorArgs { editor } = args(a)?;
                 self.db.release_editor(&editor).await;

@@ -17,7 +17,7 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 
 use crate::error::{AppError, AppResult};
 use crate::model::*;
-use crate::results::{Collector, canceled};
+use crate::results::{Ran, Sink, canceled};
 use crate::running::{Canceler, Running};
 
 const POOL_SIZE: usize = 4;
@@ -146,7 +146,7 @@ fn auth_error(e: AppError, had_password: bool) -> AppError {
 }
 
 /// Feeds a simple-query stream into the collector (rows arrive as Postgres' text output).
-async fn collect_results(stream: tokio_postgres::SimpleQueryStream, out: &mut Collector) -> AppResult<()> {
+async fn collect_results(stream: tokio_postgres::SimpleQueryStream, out: &mut impl Sink) -> AppResult<()> {
     pin_mut!(stream);
     while let Some(msg) = stream.next().await {
         match msg? {
@@ -296,15 +296,15 @@ impl PgSession {
     /// Runs `sql` (one or more statements) with the simple query protocol, so every value
     /// arrives as Postgres' own text output and any type displays correctly. With `editor`
     /// (a query tab id) it runs on that tab's own connection, otherwise on a pooled one.
-    pub async fn run(
+    pub async fn run<S: Sink>(
         &self,
         running: &Running,
         query_id: &str,
         sql: &str,
-        max_rows: usize,
+        mut out: S,
         editor: Option<&str>,
         single_statement: bool,
-    ) -> AppResult<QueryOutput> {
+    ) -> AppResult<Ran<S>> {
         let conn = match editor {
             Some(tab) => self.editor(tab).await.map(Conn::Editor),
             None => self.pooled().await.map(|c| Conn::Pooled(Box::new(c))),
@@ -318,7 +318,6 @@ impl PgSession {
         };
         running.attach(query_id, Canceler::Postgres(conn.client().cancel_token(), self.tls.clone())).await?;
         let started = Instant::now();
-        let mut out = Collector::new(max_rows);
         // SQL that includes the user's WHERE text must be one statement: Postgres refuses to
         // prepare several, so `true); DELETE …` can't sneak in whatever the quoting. Done here,
         // after the cancel handle is registered, as preparing can wait on table locks.
@@ -337,7 +336,7 @@ impl PgSession {
         };
         let duration_ms = started.elapsed().as_millis() as u64;
         let user_cancelled = running.end(query_id).await;
-        out.finish(outcome, user_cancelled, duration_ms)
+        Ok(Ran { sink: out, outcome, user_cancelled, duration_ms })
     }
 
     /// Closes a query tab's connection (the tab was closed).
