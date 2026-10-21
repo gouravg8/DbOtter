@@ -136,6 +136,7 @@ export function StatusBar() {
 
   return (
     <footer className="statusbar">
+      <div className="status-left">
       {conn ? (
         <span className="status-conn">
           <span className="dot" style={{ background: conn.color ?? "var(--subtle)" }} />
@@ -160,15 +161,18 @@ export function StatusBar() {
       ) : (
         <span className="muted">No connection</span>
       )}
-      <div className="spacer" />
+      </div>
+      <div className="status-center">
+        <button type="button" className="status-btn made-with" title="About DbOtter" onClick={() => useApp.getState().setDialog({ kind: "settings", section: "about" })}>
+          Made with <Heart size={11} className="heart" fill="currentColor" /> by Gourav Soni
+        </button>
+      </div>
+      <div className="status-right">
       {settings.vim && (
         <span className={`vim-badge ${inQuery && vimMode.startsWith("insert") ? "insert" : inQuery && vimMode.startsWith("visual") ? "visual" : ""}`}>
           <Keyboard size={12} /> {inQuery && vimMode ? vimMode.toUpperCase() : "VIM"}
         </span>
       )}
-      <button type="button" className="status-btn made-with" title="About DbOtter" onClick={() => useApp.getState().setDialog({ kind: "settings", section: "about" })}>
-        Made with <Heart size={11} className="heart" fill="currentColor" /> by Gourav Soni
-      </button>
       <button type="button" className="status-btn" title="Change the theme" onClick={() => useApp.getState().setDialog({ kind: "settings", section: "appearance" })}>
         <Palette size={12} /> {theme.name}
       </button>
@@ -183,6 +187,7 @@ export function StatusBar() {
       >
         <Command size={12} /> Commands <span className="status-kbd">{MOD} Shift P</span>
       </button>
+      </div>
     </footer>
   );
 }

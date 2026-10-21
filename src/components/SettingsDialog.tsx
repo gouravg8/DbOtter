@@ -360,7 +360,7 @@ export function SettingsDialog({ section }: { section?: SettingsTab }) {
                   <ExtLink url={ABOUT.repo.url}>{ABOUT.repo.name}</ExtLink>
                 </dd>
               </dl>
-              <p className="made-with">
+              <p className="about-made-with">
                 Made with <Heart size={12} className="heart" fill="currentColor" /> by {ABOUT.author}
               </p>
             </div>
