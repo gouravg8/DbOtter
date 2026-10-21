@@ -255,3 +255,7 @@ client certificates, installers with auto-update and code signing for macOS and 
   tunnel, not only a local one.
 - Every feature covered by integration and e2e tests, as in v0.0.1.
 - Memory stays at or below ~250 MB in the same measurement as above.
+
+## Author
+
+Made by **Gourav Soni** · X (Twitter): [@gouravsoni88](https://x.com/gouravsoni88)

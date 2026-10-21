@@ -79,7 +79,7 @@ export type Tab = QueryTab | TableTab | HistoryTab;
 export type DialogState =
   | { kind: "connection"; conn?: ConnectionConfig }
   | { kind: "password"; connId: string; error?: string }
-  | { kind: "settings" }
+  | { kind: "settings"; section?: "about" }
   | { kind: "palette"; mode: "all" | "tables" }
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
   | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }

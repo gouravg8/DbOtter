@@ -1,5 +1,7 @@
-import { Check, Copy, Trash2, Upload } from "lucide-react";
+import { Check, Copy, ExternalLink, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ABOUT } from "../lib/about";
+import { api, toAppError } from "../lib/api";
 import { MONO_FONTS, UI_FONTS, fontStack } from "../lib/fonts";
 import { MOD, useApp } from "../lib/store";
 import { BUILT_IN_THEMES, SYSTEM_THEME_ID, parseTheme, resolveTheme, themeToJson, type Theme } from "../lib/themes";
@@ -130,7 +132,27 @@ function ThemeCard({ theme, selected, onPick, onDelete }: { theme: Theme; select
   );
 }
 
-export function SettingsDialog() {
+/** A link that opens in the browser, not inside the app. */
+function ExtLink({ url, children }: { url: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={url}
+      className="ext-link"
+      onClick={(e) => {
+        e.preventDefault();
+        void api.openUrl(url).catch((err) => useApp.getState().toast(toAppError(err).message, "error"));
+      }}
+    >
+      {children} <ExternalLink size={11} />
+    </a>
+  );
+}
+
+export function SettingsDialog({ section }: { section?: "about" }) {
+  const about = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (section === "about") about.current?.scrollIntoView({ block: "start" });
+  }, [section]);
   const settings = useApp((s) => s.settings);
   const { setSettings, setDialog, toast } = useApp.getState();
   const file = useRef<HTMLInputElement>(null);
@@ -277,6 +299,25 @@ export function SettingsDialog() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section ref={about} className="about">
+        <h3>About</h3>
+        <p>
+          <b>DbOtter</b> {ABOUT.version} · a fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite.
+        </p>
+        <dl className="about-list">
+          <dt>Made by</dt>
+          <dd>{ABOUT.author}</dd>
+          <dt>X (Twitter)</dt>
+          <dd>
+            <ExtLink url={ABOUT.x.url}>@{ABOUT.x.handle}</ExtLink>
+          </dd>
+          <dt>Source</dt>
+          <dd>
+            <ExtLink url={ABOUT.repo.url}>{ABOUT.repo.name}</ExtLink>
+          </dd>
+        </dl>
       </section>
     </Modal>
   );

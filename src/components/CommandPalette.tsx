@@ -1,5 +1,6 @@
 import {
   Download,
+  Info,
   Eye,
   History,
   Keyboard,
@@ -54,6 +55,7 @@ export function CommandPalette({ mode }: { mode: "all" | "tables" }) {
         { id: "new-conn", label: "New connection", group: "Actions", icon: <Plus size={14} />, run: () => state.setDialog({ kind: "connection" }) },
         { id: "history", label: "Query history", group: "Actions", icon: <History size={14} />, hint: `${MOD} Shift H`, run: () => state.openHistory() },
         { id: "settings", label: "Settings", group: "Actions", icon: <Settings size={14} />, hint: `${MOD} ,`, run: () => state.setDialog({ kind: "settings" }) },
+        { id: "about", label: "About DbOtter", group: "Actions", icon: <Info size={14} />, run: () => state.setDialog({ kind: "settings", section: "about" }) },
         {
           id: "vim",
           label: state.settings.vim ? "Turn vim mode off" : "Turn vim mode on",

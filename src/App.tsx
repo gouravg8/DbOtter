@@ -222,7 +222,7 @@ export default function App() {
       <StatusBar />
       {dialog?.kind === "connection" && <ConnectionDialog conn={dialog.conn} />}
       {dialog?.kind === "password" && <PasswordPrompt connId={dialog.connId} error={dialog.error} />}
-      {dialog?.kind === "settings" && <SettingsDialog />}
+      {dialog?.kind === "settings" && <SettingsDialog section={dialog.section} />}
       {dialog?.kind === "palette" && <CommandPalette mode={dialog.mode} />}
       {dialog?.kind === "confirm" && <ConfirmDialog {...dialog} />}
       {dialog?.kind === "risky" && <RiskyDialog {...dialog} />}

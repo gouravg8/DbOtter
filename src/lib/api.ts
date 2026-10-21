@@ -280,6 +280,8 @@ export const api = {
     call<EditResult>("apply_edits", args),
   /** Opens the file manager with the file selected. */
   revealPath: (path: string) => call<void>("reveal_path", { path }),
+  /** Opens an https link in the default browser. */
+  openUrl: (url: string) => call<void>("open_url", { url }),
   history: (limit = 300) => call<HistoryEntry[]>("history_list", { limit }),
   clearHistory: () => call<void>("history_clear"),
 };

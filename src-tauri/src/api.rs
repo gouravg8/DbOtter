@@ -218,6 +218,22 @@ impl App {
                 ok(self.db.apply_edits(&a.id, &a.query_id, &a.schema, &a.table, &a.edits, a.dry_run).await?)
             }
             "export_dir" => ok(crate::export::default_dir().display().to_string()),
+            "open_url" => {
+                #[derive(Deserialize)]
+                struct A {
+                    url: String,
+                }
+                let A { url } = args(a)?;
+                // links in the app only: never a file or a program
+                if !url.starts_with("https://") {
+                    return Err(AppError::new("Only https links can be opened"));
+                }
+                tokio::task::spawn_blocking(move || tauri_plugin_opener::open_url(&url, None::<&str>))
+                    .await
+                    .map_err(|e| AppError::new(e.to_string()))?
+                    .map_err(|e| AppError::new(format!("Couldn't open the browser: {e}")))?;
+                ok(())
+            }
             "reveal_path" => {
                 #[derive(Deserialize)]
                 struct A {

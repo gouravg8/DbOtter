@@ -2089,3 +2089,32 @@ pre.crash {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---------- settings: about ---------- */
+
+.about p {
+  margin: 0 0 8px;
+}
+.about-list {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.about-list dt {
+  color: var(--muted);
+}
+.about-list dd {
+  margin: 0;
+}
+.ext-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ext-link:hover {
+  text-decoration: underline;
+}

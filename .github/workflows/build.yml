@@ -64,7 +64,7 @@ jobs:
           releaseName: DbOtter ${{ github.ref_name }}
           releaseBody: >-
             See the README for what's new. Windows may warn "unknown publisher" (the app isn't
-            signed yet): More info → Run anyway.
+            signed yet): More info → Run anyway. Made by Gourav Soni (X: @gouravsoni88).
           releaseDraft: true
           args: --bundles ${{ matrix.bundles }}
 

@@ -35,6 +35,8 @@
     ],
     "category": "DeveloperTool",
     "publisher": "Gourav Soni",
+    "copyright": "© 2026 Gourav Soni",
+    "homepage": "https://github.com/gouravg8/DbOtter",
     "shortDescription": "Fast, keyboard-first database client",
     "longDescription": "DbOtter is a fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite: browse tables, run SQL with vim mode, switch themes, all in a small native app."
   }
