@@ -22,6 +22,10 @@ export interface Settings {
   customThemes: Theme[];
   vim: boolean;
   fontSize: number;
+  /** Interface font; empty: the default. */
+  uiFont: string;
+  /** Editor and grid font; empty: the default. */
+  monoFont: string;
   /** Rows kept per query result; the rest are not fetched. */
   maxRows: number;
   pageSize: number;
@@ -162,6 +166,8 @@ export const DEFAULT_SETTINGS: Settings = {
   customThemes: [],
   vim: false,
   fontSize: 13,
+  uiFont: "",
+  monoFont: "",
   maxRows: 5000,
   pageSize: 100,
   sidebarWidth: 260,

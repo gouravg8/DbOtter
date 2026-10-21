@@ -1,5 +1,6 @@
 import { Check, Copy, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { MONO_FONTS, UI_FONTS, fontStack } from "../lib/fonts";
 import { MOD, useApp } from "../lib/store";
 import { BUILT_IN_THEMES, SYSTEM_THEME_ID, parseTheme, resolveTheme, themeToJson, type Theme } from "../lib/themes";
 import { Kbd, Modal, copyText } from "./ui";
@@ -22,6 +23,48 @@ const SHORTCUTS: [string, string][] = [
   [`${MOD} Shift H`, "Query history"],
   [`${MOD} ,`, "Settings"],
 ];
+
+/** A font name with suggestions, applied as you type, and a preview in that font. */
+function FontField({
+  label,
+  value,
+  options,
+  fallback,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  fallback: "--ui-default" | "--mono-default";
+  placeholder: string;
+  onChange: (v: string) => void;
+}) {
+  const list = `fonts-${fallback}`;
+  return (
+    <div className="font-field">
+      <label className="field inline">
+        <span>{label}</span>
+        <span className="font-input">
+          <input value={value} list={list} placeholder={placeholder} spellCheck={false} aria-label={`${label} font`} onChange={(e) => onChange(e.target.value)} />
+          {value && (
+            <button type="button" className="btn ghost small" onClick={() => onChange("")}>
+              Default
+            </button>
+          )}
+        </span>
+        <datalist id={list}>
+          {options.map((f) => (
+            <option key={f} value={f} />
+          ))}
+        </datalist>
+      </label>
+      <div className="font-preview" style={{ fontFamily: fontStack(value, fallback) }}>
+        select user_id, created_at from login_audit — 0O 1lI {"{}"} =&gt; _
+      </div>
+    </div>
+  );
+}
 
 /** Typed freely; clamped and saved on blur or Enter (clamping per keystroke blocks typing "14"). */
 function NumberField({ value, min, max, step, onCommit }: { value: number; min: number; max: number; step?: number; onCommit: (n: number) => void }) {
@@ -175,10 +218,31 @@ export function SettingsDialog() {
           <input type="checkbox" checked={settings.vim} onChange={(e) => setSettings({ vim: e.target.checked })} />
           Vim mode <span className="muted small">(editor keys, plus h j k l, gg, G, y in grids and the sidebar)</span>
         </label>
+      </section>
+
+      <section>
+        <h3>Fonts</h3>
+        <FontField
+          label="Interface"
+          value={settings.uiFont}
+          options={UI_FONTS}
+          fallback="--ui-default"
+          placeholder="Default (system font)"
+          onChange={(uiFont) => setSettings({ uiFont })}
+        />
+        <FontField
+          label="Editor and grid"
+          value={settings.monoFont}
+          options={MONO_FONTS}
+          fallback="--mono-default"
+          placeholder="Default (JetBrains Mono, Fira Code…)"
+          onChange={(monoFont) => setSettings({ monoFont })}
+        />
         <label className="field inline">
-          <span>Font size</span>
+          <span>Editor and grid size</span>
           <NumberField value={settings.fontSize} min={10} max={22} onCommit={(fontSize) => setSettings({ fontSize })} />
         </label>
+        <p className="muted small">Type the name of any font installed on your computer. One that isn't installed falls back to the default.</p>
       </section>
 
       <section>

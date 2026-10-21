@@ -11,6 +11,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TableTab } from "./components/TableTab";
 import { MOD, isMac, modKey, useApp } from "./lib/store";
+import { fontStack } from "./lib/fonts";
 import { applyTheme, resolveTheme } from "./lib/themes";
 
 const DARK = "(prefers-color-scheme: dark)";
@@ -19,6 +20,8 @@ function useTheme() {
   const themeId = useApp((s) => s.settings.themeId);
   const custom = useApp((s) => s.settings.customThemes);
   const fontSize = useApp((s) => s.settings.fontSize);
+  const uiFont = useApp((s) => s.settings.uiFont);
+  const monoFont = useApp((s) => s.settings.monoFont);
   const [prefersDark, setPrefersDark] = useState(() => window.matchMedia(DARK).matches);
   useEffect(() => {
     const mq = window.matchMedia(DARK);
@@ -31,6 +34,11 @@ function useTheme() {
     document.documentElement.style.setProperty("--editor-font-size", `${fontSize}px`);
     document.documentElement.style.setProperty("--grid-font-size", `${Math.max(10, fontSize - 0.5)}px`);
   }, [fontSize]);
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--ui", fontStack(uiFont, "--ui-default"));
+    root.setProperty("--mono", fontStack(monoFont, "--mono-default"));
+  }, [uiFont, monoFont]);
 }
 
 /** Keys vim uses in the editor (Ctrl+W delete word, Ctrl+R redo, Ctrl+B/F page…): with vim
