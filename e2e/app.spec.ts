@@ -545,6 +545,54 @@ test("read-only connections refuse writes and say so", async ({ page }) => {
   await expect(pane(page).locator(".error-panel")).toContainText("read-only transaction");
 });
 
+test("tab menu: close others, left, right, all, by connection", async ({ page }) => {
+  await api("connection_save", {
+    input: { name: "Second", host: "127.0.0.1", port: PORT, database: "shop", user: "postgres", sslMode: "disable", savePassword: false },
+  });
+  await open(page);
+  await connect(page, "Shop");
+  await connect(page, "Second");
+  const shop = page.locator(".tree-row", { hasText: "customers" });
+  // tabs: customers (Shop), Weird (Shop), customers (Second), Query 1
+  await shop.first().click();
+  await page.locator(".tree-row", { hasText: "Weird" }).first().click();
+  await shop.nth(1).click();
+  await page.keyboard.press("Control+t");
+  const tabs = page.locator(".tab");
+  await expect(tabs).toHaveCount(4);
+  const menuOn = async (i: number, item: RegExp | string) => {
+    await tabs.nth(i).click({ button: "right" });
+    await page.getByRole("menuitem", { name: item, exact: typeof item === "string" }).click();
+  };
+
+  await menuOn(1, "Close tabs to the right");
+  await expect(tabs).toHaveCount(2);
+  await expect(page.locator(".tab.active")).toContainText("Weird");
+  // reopens the last one closed: Query 1 (on "Second", the active connection when it was made)
+  await page.keyboard.press("Control+Shift+T");
+  await expect(tabs).toHaveCount(3);
+  await expect(tabs.nth(2)).toContainText("Query 1");
+
+  await menuOn(1, "Close tabs to the left");
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.first()).toContainText("Weird");
+
+  await menuOn(0, 'Close all tabs of "Shop"');
+  await expect(tabs).toHaveCount(1);
+  await expect(page.locator(".tab")).toContainText("Query 1");
+
+  await page.keyboard.press("Control+t");
+  await page.keyboard.press("Control+t");
+  await menuOn(1, "Close others");
+  await expect(tabs).toHaveCount(1);
+  await expect(page.locator(".tab.active")).toContainText("Query");
+
+  await page.keyboard.press("Control+t");
+  await menuOn(0, "Close all");
+  await expect(tabs).toHaveCount(0);
+  await expect(page.locator(".welcome")).toBeVisible();
+});
+
 test("connections: edit and delete with confirmation", async ({ page }) => {
   await open(page);
   const row = page.locator(".tree-row", { hasText: "Shop" });

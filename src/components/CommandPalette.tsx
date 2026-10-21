@@ -62,8 +62,16 @@ export function CommandPalette({ mode }: { mode: "all" | "tables" }) {
         },
         { id: "sidebar", label: state.sidebarOpen ? "Hide sidebar" : "Show sidebar", group: "Actions", icon: <PanelLeft size={14} />, hint: `${MOD} B`, run: () => state.setSidebarOpen(!state.sidebarOpen) },
       );
-      if (state.activeTabId)
-        out.push({ id: "close-tab", label: "Close tab", group: "Actions", icon: <X size={14} />, hint: `${MOD} W`, run: () => state.closeTab(state.activeTabId!) });
+      if (state.activeTabId) {
+        const active = state.activeTabId;
+        const others = state.tabs.filter((t) => t.id !== active).map((t) => t.id);
+        out.push({ id: "close-tab", label: "Close tab", group: "Actions", icon: <X size={14} />, hint: `${MOD} W`, run: () => state.closeTab(active) });
+        if (others.length)
+          out.push({ id: "close-others", label: "Close other tabs", group: "Actions", icon: <X size={14} />, run: () => state.closeTabs(others, active) });
+        out.push({ id: "close-all", label: "Close all tabs", group: "Actions", icon: <X size={14} />, run: () => state.closeTabs(state.tabs.map((t) => t.id)) });
+      }
+      if (state.closedTabs.length)
+        out.push({ id: "reopen", label: "Reopen closed tab", group: "Actions", icon: <History size={14} />, hint: `${MOD} Shift T`, run: () => state.reopenClosedTab() });
       if (curConn && state.sessions[curConn.id]?.status === "connected")
         out.push(
           { id: "refresh", label: "Refresh schema", detail: curConn.name, group: "Actions", icon: <RefreshCw size={14} />, run: () => void state.refreshSchema(curConn.id) },

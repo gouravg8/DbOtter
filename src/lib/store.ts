@@ -113,6 +113,8 @@ interface State {
   openTable: (connId: string, schema: string, table: string, relKind: RelationKind, view?: TableTab["view"]) => void;
   openHistory: () => void;
   closeTab: (id: string) => void;
+  /** Closes several tabs; `keep` (if given) becomes the active one. */
+  closeTabs: (ids: string[], keep?: string) => void;
   reopenClosedTab: () => void;
   setActiveTab: (id: string) => void;
   cycleTab: (delta: 1 | -1) => void;
@@ -351,6 +353,11 @@ export const useApp = create<State>()(
         const activeTabId = get().activeTabId === id ? (rest[i] ?? rest[i - 1])?.id ?? null : get().activeTabId;
         const closed: Tab = tab.kind === "query" ? { ...tab, running: undefined, output: undefined, error: undefined } : tab;
         set({ tabs: rest, activeTabId, closedTabs: [...get().closedTabs, closed].slice(-10) });
+      },
+
+      closeTabs: (ids, keep) => {
+        for (const id of ids) get().closeTab(id);
+        if (keep && get().tabs.some((t) => t.id === keep)) get().setActiveTab(keep);
       },
 
       reopenClosedTab: () => {

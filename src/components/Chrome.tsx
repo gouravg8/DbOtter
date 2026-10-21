@@ -3,7 +3,7 @@ import { CircleAlert, History, Keyboard, Lock, Plus, SquareTerminal, Table, X } 
 import { useEffect, useRef, useState } from "react";
 import { MOD, useApp, type Tab } from "../lib/store";
 import { resolveTheme } from "../lib/themes";
-import { Spinner } from "./ui";
+import { Spinner, useMenu, type MenuItem } from "./ui";
 
 function tabLabel(t: Tab) {
   if (t.kind === "query") return t.title;
@@ -15,9 +15,38 @@ export function TabBar() {
   const tabs = useApp((s) => s.tabs);
   const activeId = useApp((s) => s.activeTabId);
   const connections = useApp((s) => s.connections);
-  const { setActiveTab, closeTab, openQueryTab, updateTab } = useApp.getState();
+  const { setActiveTab, closeTab, closeTabs, openQueryTab, updateTab, reopenClosedTab } = useApp.getState();
+  const hasClosed = useApp((s) => s.closedTabs.length > 0);
   const [renaming, setRenaming] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
+  const menu = useMenu();
+
+  const tabMenu = (t: Tab, x: number, y: number) => {
+    const i = tabs.findIndex((x) => x.id === t.id);
+    const ids = (list: Tab[]) => list.map((x) => x.id);
+    const connId = "connId" in t ? t.connId : null;
+    const conn = connections.find((c) => c.id === connId);
+    const sameConn = tabs.filter((x) => "connId" in x && x.connId === connId);
+    const tables = tabs.filter((x) => x.kind === "table");
+    const item = (label: string, list: Tab[], hint?: string, keep?: string): MenuItem => ({
+      label,
+      hint,
+      disabled: !list.length,
+      onSelect: () => closeTabs(ids(list), keep),
+    });
+    menu.open(x, y, [
+      { label: "Close", icon: <X size={14} />, hint: `${MOD} W`, onSelect: () => closeTab(t.id) },
+      item("Close others", tabs.filter((x) => x.id !== t.id), undefined, t.id),
+      item("Close tabs to the left", tabs.slice(0, i), undefined, t.id),
+      item("Close tabs to the right", tabs.slice(i + 1), undefined, t.id),
+      item("Close all", tabs),
+      "divider",
+      ...(conn ? [item(`Close all tabs of "${conn.name}"`, sameConn)] : []),
+      item("Close all table tabs", tables, undefined, t.kind === "table" ? undefined : t.id),
+      "divider",
+      { label: "Reopen closed tab", hint: `${MOD} Shift T`, disabled: !hasClosed, onSelect: reopenClosedTab },
+    ]);
+  };
 
   useEffect(() => {
     bar.current?.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -42,6 +71,10 @@ export function TabBar() {
               } else if (e.button === 0) setActiveTab(t.id);
             }}
             onDoubleClick={() => t.kind === "query" && setRenaming(t.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              tabMenu(t, e.clientX, e.clientY);
+            }}
           >
             {conn?.color && <span className="tab-color" style={{ background: conn.color }} />}
             {t.kind === "query" && t.running ? <Spinner size={12} /> : <Icon size={13} className="tab-icon" />}
@@ -81,6 +114,7 @@ export function TabBar() {
       <button type="button" className="icon-btn tab-new" title={`New query (${MOD} T)`} onClick={() => openQueryTab()}>
         <Plus size={15} />
       </button>
+      {menu.element}
     </div>
   );
 }

@@ -48,7 +48,7 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 - Themes: System (follows the OS), Otter Light / Dark, One Dark, Gruvbox Dark, Catppuccin Mocha / Latte, Nord
 - Custom themes from a JSON file (Settings → Import theme); start from "Copy theme as JSON"
 - Vim mode: full vim in the editor (lazy-loaded, ~120 KB only when enabled; `Ctrl W / R / B / E / F / G` belong to vim there, `:q` closes the tab), plus `h j k l`, `gg`, `G`, `0`, `$`, `y` / `Y`, `Ctrl d / u` in grids and `j k h l` in the sidebar
-- Command palette, tabs, and shortcuts for everything
+- Command palette, tabs, and shortcuts for everything; right-click a tab to close others, those to the left or right, all of them, or all tabs of one database
 
 ### Shortcuts
 
