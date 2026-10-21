@@ -282,13 +282,26 @@ export function Sidebar() {
                 {...common}
                 role="treeitem"
                 aria-expanded={open}
-                onClick={() => activate(row)}
+                title={s?.status === "connected" ? undefined : "Double-click to connect"}
+                // a stray click does nothing: connecting (or opening) takes a double-click
+                onDoubleClick={() => activate(row)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   menu.open(e.clientX, e.clientY, connMenu(row.conn));
                 }}
               >
-                <span className="chev">{s?.status === "connected" ? open ? <ChevronDown size={13} /> : <ChevronRight size={13} /> : null}</span>
+                <span
+                  className={`chev ${s?.status === "connected" ? "clickable" : ""}`}
+                  // the arrow of a connected database opens it with one click
+                  onClick={(e) => {
+                    if (s?.status !== "connected") return;
+                    e.stopPropagation();
+                    app.toggleExpanded(row.key);
+                  }}
+                  onDoubleClick={(e) => s?.status === "connected" && e.stopPropagation()}
+                >
+                  {s?.status === "connected" ? open ? <ChevronDown size={13} /> : <ChevronRight size={13} /> : null}
+                </span>
                 <span className="dot" style={{ background: row.conn.color ?? "var(--subtle)" }} />
                 <span className="tree-label strong">{row.conn.name}</span>
                 <span className="tree-status">

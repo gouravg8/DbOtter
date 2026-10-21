@@ -95,7 +95,7 @@ test("MySQL: connect, browse databases, query", async ({ page }) => {
   await api("disconnect", { id: conn.id });
 
   await page.goto("/");
-  await page.locator(".tree-row", { hasText: "My" }).click();
+  await page.locator(".tree-row", { hasText: "My" }).dblclick();
   // the first database may already be open
   const db = page.locator(".tree-row", { hasText: "otter_e2e" });
   await db.waitFor();

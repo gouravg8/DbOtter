@@ -35,7 +35,7 @@ async function open(page: Page, settings: Record<string, unknown> = {}) {
 }
 
 async function connect(page: Page, name = "Shop") {
-  await page.locator(".tree-row", { hasText: name }).click();
+  await page.locator(".tree-row", { hasText: name }).dblclick();
   await expect(page.locator(".tree-row", { hasText: "customers" })).toBeVisible();
 }
 
@@ -505,6 +505,29 @@ test("settings saved by v0.0.1 with the old 200-row default move to 100", async 
   await connect(page);
   await page.locator(".tree-row", { hasText: "customers" }).click();
   await expect(pane(page).locator(".results-foot")).toContainText("Rows 1–100");
+});
+
+test("connections connect on double-click; a single click does nothing", async ({ page }) => {
+  await open(page);
+  const row = page.locator(".tree-row", { hasText: "Shop" });
+  await row.click();
+  await page.waitForTimeout(400);
+  await expect(row.locator(".live")).toHaveCount(0);
+  await expect(page.locator(".tree-row", { hasText: "customers" })).toHaveCount(0);
+  await expect(row).toHaveAttribute("title", "Double-click to connect");
+
+  await row.dblclick();
+  await expect(row.locator(".live")).toBeVisible();
+  await expect(page.locator(".tree-row", { hasText: "customers" })).toBeVisible();
+  // connected: a double-click closes and opens it, so does one click on the arrow
+  await row.dblclick();
+  await expect(page.locator(".tree-row", { hasText: "customers" })).toHaveCount(0);
+  await row.locator(".chev").click();
+  await expect(page.locator(".tree-row", { hasText: "customers" })).toBeVisible();
+  // a single click on a connected row still does nothing
+  await row.click();
+  await page.waitForTimeout(300);
+  await expect(page.locator(".tree-row", { hasText: "customers" })).toBeVisible();
 });
 
 test("connections: edit and delete with confirmation", async ({ page }) => {

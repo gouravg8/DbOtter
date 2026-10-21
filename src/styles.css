@@ -433,6 +433,16 @@ body.col-resize * {
   width: 13px;
   color: var(--subtle);
 }
+.chev.clickable {
+  margin: -4px;
+  padding: 4px;
+  box-sizing: content-box;
+  border-radius: 4px;
+}
+.chev.clickable:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
 .tree-icon {
   flex: none;
   color: var(--subtle);
