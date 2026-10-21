@@ -2314,3 +2314,42 @@ input.switch:focus-visible {
 .brand-logo {
   border-radius: 5px;
 }
+
+/* ---------- updates ---------- */
+
+.update-badge {
+  color: var(--accent-fg) !important;
+  background: var(--accent) !important;
+}
+.update-note {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+.update-notes {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  font-family: var(--ui);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+.update-bar {
+  height: 6px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: var(--border);
+  border-radius: 3px;
+}
+.update-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.about-update {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}

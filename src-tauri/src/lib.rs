@@ -32,6 +32,9 @@ pub fn run() {
     tauri::Builder::default()
         // the save-file dialog for exports
         .plugin(tauri_plugin_dialog::init())
+        // updates from GitHub Releases, signed with the project's key; relaunch after
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let store = store::Store::new(dir).map_err(|e| e.message)?;

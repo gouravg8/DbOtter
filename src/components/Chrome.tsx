@@ -1,5 +1,6 @@
 /** Tab bar, status bar and toasts. */
-import { CircleAlert, Command, Heart, History, Keyboard, Lock, Palette, Plus, Settings, SquareTerminal, Table, X } from "lucide-react";
+import { CircleAlert, Command, Download, Heart, History, Keyboard, Lock, Palette, Plus, Settings, SquareTerminal, Table, X } from "lucide-react";
+import { useUpdates } from "../lib/updates";
 import { useEffect, useRef, useState } from "react";
 import { MOD, useApp, type Tab } from "../lib/store";
 import { resolveTheme } from "../lib/themes";
@@ -126,6 +127,7 @@ export function StatusBar() {
   const settings = useApp((s) => s.settings);
   const inQuery = useApp((s) => s.tabs.find((t) => t.id === s.activeTabId)?.kind === "query");
   const [vimMode, setVimMode] = useState("");
+  const update = useUpdates((s) => s.state);
   const theme = resolveTheme(settings.themeId, settings.customThemes, window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   useEffect(() => {
@@ -168,6 +170,11 @@ export function StatusBar() {
         </button>
       </div>
       <div className="status-right">
+      {"version" in update && (
+        <button type="button" className="status-btn update-badge" title="Install the new version" onClick={() => useApp.getState().setDialog({ kind: "update" })}>
+          <Download size={12} /> Update {update.version}
+        </button>
+      )}
       {settings.vim && (
         <span className={`vim-badge ${inQuery && vimMode.startsWith("insert") ? "insert" : inQuery && vimMode.startsWith("visual") ? "visual" : ""}`}>
           <Keyboard size={12} /> {inQuery && vimMode ? vimMode.toUpperCase() : "VIM"}

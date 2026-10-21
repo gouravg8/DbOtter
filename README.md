@@ -11,13 +11,19 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 From [Releases](https://github.com/gouravg8/DbOtter/releases):
 
 - **Windows**: `DbOtter_<version>_x64-setup.exe` installs for your user (no admin rights) and
-  adds DbOtter to the Start menu and search; `.msi` for managed installs. The app isn't
-  code-signed yet, so Windows may say "Windows protected your PC": More info → Run anyway.
+  adds DbOtter to the Start menu and search. The app isn't code-signed yet, so Windows may
+  say "Windows protected your PC": More info → Run anyway.
 - **Ubuntu / Debian**: `sudo apt install ./DbOtter_<version>_amd64.deb`, or make the
   `.AppImage` executable and run it (any distribution).
 
+**Updates**: DbOtter checks for a newer release a few seconds after it starts (and every 6
+hours), shows "Update x.y.z" in the status bar, and installs it on request, keeping your
+connections, settings and saved passwords. Settings → About → Check for updates asks right
+away. Updates are signed with the project's key and anything else is refused.
+
 Builds come from `.github/workflows/build.yml`: pushing a `v*` tag builds both and makes a
-draft release; Actions → Build → Run workflow builds without releasing.
+draft release; Actions → Build → Run workflow builds without releasing. Installed apps only
+see a release once it is published.
 
 ## Features
 
@@ -142,7 +148,16 @@ pnpm tauri build --no-bundle   # release binary: src-tauri/target/release/dbotte
 pnpm tauri build               # installers (deb, rpm, AppImage / dmg / msi)
 ```
 
-Data lives in the OS app-data folder (`~/.local/share/info.smoothops.dbotter` on Linux):
+Installers are signed for the updater, so `tauri build` needs the private key (kept outside
+the repo; CI has it as the `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` secrets):
+
+```bash
+TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/dbotter.key)" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat ~/.tauri/dbotter.key.password)" \
+pnpm tauri build --bundles deb,appimage
+```
+
+Data lives in the OS app-data folder (`~/.local/share/work.gourav.dbotter` on Linux, `%APPDATA%\\work.gourav.dbotter` on Windows):
 `connections.json` (no passwords) and `history.jsonl`. Settings, themes and open tabs are kept
 in the webview's local storage.
 

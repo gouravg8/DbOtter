@@ -2,6 +2,7 @@ import { Check, Copy, Database, ExternalLink, Heart, Info, Keyboard, Palette, Sq
 import { useEffect, useRef, useState } from "react";
 import logo from "../assets/logo.png";
 import { ABOUT } from "../lib/about";
+import { checkForUpdate, useUpdates } from "../lib/updates";
 import { api, toAppError } from "../lib/api";
 import { MONO_FONTS, UI_FONTS, fontStack } from "../lib/fonts";
 import { MOD, useApp, type SettingsTab } from "../lib/store";
@@ -156,6 +157,27 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "shortcuts", label: "Shortcuts", icon: <Keyboard size={15} /> },
   { id: "about", label: "About", icon: <Info size={15} /> },
 ];
+
+/** Check for updates, and what came of it. */
+function UpdateCheck() {
+  const state = useUpdates((s) => s.state);
+  const { setDialog } = useApp.getState();
+  return (
+    <div className="about-update">
+      {state.status === "available" || state.status === "downloading" || state.status === "installing" ? (
+        <button type="button" className="btn primary small" onClick={() => setDialog({ kind: "update" })}>
+          Update to {state.version}
+        </button>
+      ) : (
+        <button type="button" className="btn small" disabled={state.status === "checking"} onClick={() => void checkForUpdate()}>
+          {state.status === "checking" ? "Checking…" : "Check for updates"}
+        </button>
+      )}
+      {state.status === "none" && <span className="muted small">You have the latest version.</span>}
+      {state.status === "error" && <span className="danger-text small">{state.message}</span>}
+    </div>
+  );
+}
 
 /** One setting: what it is on the left, its control on the right. */
 function Row({ title, desc, children }: { title: string; desc?: React.ReactNode; children: React.ReactNode }) {
@@ -347,6 +369,7 @@ export function SettingsDialog({ section }: { section?: SettingsTab }) {
               <img src={logo} alt="" className="about-logo" width={64} height={64} />
               <h2 className="about-name">DbOtter</h2>
               <div className="muted">Version {ABOUT.version}</div>
+              <UpdateCheck />
               <p className="about-tagline">A fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite.</p>
               <dl className="about-list">
                 <dt>Made by</dt>

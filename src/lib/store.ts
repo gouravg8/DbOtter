@@ -84,6 +84,7 @@ export type DialogState =
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
   | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }
   | { kind: "export"; target: ExportTarget }
+  | { kind: "update" }
   | { kind: "review"; connId: string; title: string; statements: string[]; onSave: (queryId: string) => Promise<void> }
   | null;
 

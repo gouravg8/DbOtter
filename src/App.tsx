@@ -5,6 +5,7 @@ import { StatusBar, TabBar, Toasts } from "./components/Chrome";
 import { CommandPalette } from "./components/CommandPalette";
 import { ReviewDialog } from "./components/Edits";
 import { ExportDialog } from "./components/ExportDialog";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { ConfirmDialog, ConnectionDialog, PasswordPrompt, RiskyDialog } from "./components/ConnectionDialog";
 import { HistoryTab } from "./components/HistoryTab";
 import { QueryTab } from "./components/QueryTab";
@@ -14,6 +15,7 @@ import { TableTab } from "./components/TableTab";
 import { MOD, isMac, modKey, useApp } from "./lib/store";
 import { fontStack } from "./lib/fonts";
 import { applyTheme, resolveTheme } from "./lib/themes";
+import { checkForUpdate } from "./lib/updates";
 
 const DARK = "(prefers-color-scheme: dark)";
 
@@ -129,6 +131,24 @@ function useShortcuts() {
   }, []);
 }
 
+/** Looks for an update a little after start (not to slow it down), then every 6 hours. */
+function useUpdateCheck() {
+  useEffect(() => {
+    const run = async () => {
+      const found = await checkForUpdate(true);
+      if (found.status !== "available") return;
+      const { toast, setDialog } = useApp.getState();
+      toast(`DbOtter ${found.version} is available`, "info", { label: "View", run: () => setDialog({ kind: "update" }) });
+    };
+    const first = setTimeout(run, 5000);
+    const every = setInterval(run, 6 * 60 * 60 * 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, []);
+}
+
 /** Shows render errors instead of a blank window. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -190,6 +210,7 @@ function Welcome() {
 export default function App() {
   useTheme();
   useShortcuts();
+  useUpdateCheck();
   const tabs = useApp((s) => s.tabs);
   const activeId = useApp((s) => s.activeTabId);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
@@ -228,6 +249,7 @@ export default function App() {
       {dialog?.kind === "risky" && <RiskyDialog {...dialog} />}
       {dialog?.kind === "export" && <ExportDialog target={dialog.target} />}
       {dialog?.kind === "review" && <ReviewDialog {...dialog} />}
+      {dialog?.kind === "update" && <UpdateDialog />}
       <Toasts />
     </div>
     </ErrorBoundary>
