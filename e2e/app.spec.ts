@@ -593,6 +593,48 @@ test("tab menu: close others, left, right, all, by connection", async ({ page })
   await expect(page.locator(".welcome")).toBeVisible();
 });
 
+test("production connections ask before risky statements", async ({ page }) => {
+  await open(page);
+  await page.locator(".tree-row", { hasText: "Shop" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Edit connection" }).click();
+  await page.locator(".check", { hasText: "Production" }).locator("input").check();
+  await page.getByRole("button", { name: "Save & connect" }).click();
+  await expect(page.locator(".tree-row", { hasText: "Shop" }).locator(".prod-badge")).toHaveText("prod");
+
+  await page.keyboard.press("Control+t");
+  const editor = pane(page).locator(".cm-content");
+  await editor.click();
+  await page.keyboard.type("create temp table scratch as select g as a from generate_series(1, 3) g");
+  await page.keyboard.press("Control+Enter");
+  await expect(pane(page).locator(".results-message")).toContainText("Statement OK");
+
+  // DELETE without WHERE stops at the dialog; Cancel (and a reflex Enter) keep the rows
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("delete from scratch");
+  await page.keyboard.press("Control+Enter");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText('Run on production "Shop"?');
+  await expect(dialog.locator(".prod-badge")).toHaveText("DELETE without WHERE");
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  await editor.click();
+  await page.keyboard.press("Control+Enter");
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // a WHERE runs straight away
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("delete from scratch where a = 1");
+  await page.keyboard.press("Control+Enter");
+  await expect(pane(page).locator(".results-message")).toContainText("1 row affected");
+
+  // Run anyway runs it
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("delete from scratch");
+  await page.keyboard.press("Control+Enter");
+  await page.getByRole("button", { name: "Run anyway" }).click();
+  await expect(pane(page).locator(".results-message")).toContainText("2 rows affected");
+});
+
 test("connections: edit and delete with confirmation", async ({ page }) => {
   await open(page);
   const row = page.locator(".tree-row", { hasText: "Shop" });

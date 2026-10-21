@@ -4,6 +4,7 @@ import { api, DEFAULT_PORT, KIND_LABEL, toAppError, type ConnectionConfig, type 
 import { parseConnectionUrl } from "../lib/format";
 import { useApp } from "../lib/store";
 import { describeConnection } from "../lib/dialect";
+import type { Risk } from "../lib/risk";
 import { Modal, Spinner } from "./ui";
 
 const COLORS = [null, "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444"];
@@ -410,6 +411,52 @@ export function PasswordPrompt({ connId, error }: { connId: string; error?: stri
         </label>
         <button type="submit" hidden />
       </form>
+    </Modal>
+  );
+}
+
+/** Risky statements about to run on a production connection. Cancel has the focus. */
+export function RiskyDialog({ connName, risks, onConfirm }: { connName: string; risks: Risk[]; onConfirm: () => void }) {
+  const { setDialog } = useApp.getState();
+  return (
+    <Modal
+      title={
+        <span className="risky-title">
+          <ShieldAlert size={16} /> Run on production "{connName}"?
+        </span>
+      }
+      onClose={() => setDialog(null)}
+      width={560}
+      footer={
+        <>
+          <div className="spacer" />
+          <button type="button" className="btn" onClick={() => setDialog(null)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn danger-solid"
+            onClick={() => {
+              setDialog(null);
+              onConfirm();
+            }}
+          >
+            Run anyway
+          </button>
+        </>
+      }
+    >
+      <p className="muted small">
+        {risks.length === 1 ? "This statement changes" : "These statements change"} more than a few rows, or remove things.
+      </p>
+      <ul className="risks">
+        {risks.map((r, i) => (
+          <li key={i}>
+            <span className="prod-badge">{r.reason}</span>
+            <pre className="mono">{r.statement.length > 300 ? `${r.statement.slice(0, 300)}…` : r.statement}</pre>
+          </li>
+        ))}
+      </ul>
     </Modal>
   );
 }

@@ -12,6 +12,7 @@ import {
   type SchemaTree,
   type SessionInfo,
 } from "./api";
+import { riskyStatements, type Risk } from "./risk";
 import { SYSTEM_THEME_ID, type Theme } from "./themes";
 
 export interface Settings {
@@ -71,6 +72,7 @@ export type DialogState =
   | { kind: "settings" }
   | { kind: "palette"; mode: "all" | "tables" }
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
+  | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }
   | null;
 
 export interface Toast {
@@ -119,7 +121,8 @@ interface State {
   setActiveTab: (id: string) => void;
   cycleTab: (delta: 1 | -1) => void;
   updateTab: (id: string, patch: Partial<QueryTab> | Partial<TableTab>) => void;
-  runQuery: (tabId: string, sql: string, offset: number) => Promise<void>;
+  /** `confirmed`: the user already agreed to run risky statements on a production connection. */
+  runQuery: (tabId: string, sql: string, offset: number, confirmed?: boolean) => Promise<void>;
   cancelQuery: (tabId: string) => Promise<void>;
 
   setDialog: (d: DialogState) => void;
@@ -400,12 +403,21 @@ export const useApp = create<State>()(
       updateTab: (id, patch) =>
         set({ tabs: get().tabs.map((t) => (t.id === id ? ({ ...t, ...patch } as Tab) : t)) }),
 
-      runQuery: async (tabId, sql, offset) => {
+      runQuery: async (tabId, sql, offset, confirmed = false) => {
         const tab = get().tabs.find((t) => t.id === tabId);
         if (!tab || tab.kind !== "query" || !sql.trim()) return;
         if (tab.running) return get().toast("A query is already running in this tab (cancel it first)", "error");
         if (!tab.connId) return get().toast("Pick a connection for this tab first", "error");
         const connId = tab.connId;
+        const conn = get().connections.find((c) => c.id === connId);
+        // production: UPDATE / DELETE without WHERE, DROP, TRUNCATE wait for a yes
+        if (conn?.production && !confirmed) {
+          const risks = riskyStatements(sql);
+          if (risks.length) {
+            set({ dialog: { kind: "risky", connName: conn.name, risks, onConfirm: () => void get().runQuery(tabId, sql, offset, true) } });
+            return;
+          }
+        }
         const queryId = newId();
         const startedAt = Date.now();
         // still this tab's current run? (cancelled, closed or replaced meanwhile: drop it)

@@ -455,6 +455,41 @@ body.col-resize * {
   color: var(--muted);
   background: var(--hover);
 }
+.risky-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.risky-title svg {
+  color: var(--danger);
+}
+.risks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.risks li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.risks pre {
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
 .safety {
   display: flex;
   flex-direction: column;
