@@ -1,5 +1,5 @@
 /** Tab bar, status bar and toasts. */
-import { CircleAlert, Command, Download, Heart, History, Keyboard, Lock, Palette, Plus, Settings, SquareTerminal, Table, X } from "lucide-react";
+import { CircleAlert, Command, Download, Heart, History, Keyboard, Lock, Palette, PanelLeftClose, PanelLeftOpen, Plus, Settings, SquareTerminal, Table, X } from "lucide-react";
 import { useUpdates } from "../lib/updates";
 import { useEffect, useRef, useState } from "react";
 import { MOD, useApp, type Tab } from "../lib/store";
@@ -18,6 +18,7 @@ export function TabBar() {
   const connections = useApp((s) => s.connections);
   const { setActiveTab, closeTab, closeTabs, openQueryTab, updateTab, reopenClosedTab } = useApp.getState();
   const hasClosed = useApp((s) => s.closedTabs.length > 0);
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
   const [renaming, setRenaming] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
   const menu = useMenu();
@@ -55,6 +56,16 @@ export function TabBar() {
 
   return (
     <div className="tabbar" ref={bar} role="tablist">
+      <button
+        type="button"
+        className="icon-btn sidebar-toggle"
+        title={`${sidebarOpen ? "Hide" : "Show"} sidebar (${MOD} B)`}
+        aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+        aria-pressed={sidebarOpen}
+        onClick={() => useApp.getState().setSidebarOpen(!sidebarOpen)}
+      >
+        {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+      </button>
       {tabs.map((t) => {
         const conn = "connId" in t ? connections.find((c) => c.id === t.connId) : undefined;
         const Icon = t.kind === "query" ? SquareTerminal : t.kind === "table" ? Table : History;

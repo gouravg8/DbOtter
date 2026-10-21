@@ -3,7 +3,7 @@
 ![DbOtter: browsing a MySQL table, with the schema tree on the left](docs/hero.png)
 
 A fast, keyboard-first database client for **PostgreSQL**, **MySQL / MariaDB** and
-**SQLite**. **v0.0.2**
+**SQLite**. **v0.0.3**
 
 Tauri v2 + Rust backend, React + CodeMirror 6 frontend. It uses the operating system's own
 webview instead of bundling Chromium, so the app is a single ~9 MB binary.

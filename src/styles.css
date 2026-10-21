@@ -2353,3 +2353,14 @@ input.switch:focus-visible {
   gap: 6px;
   margin-top: 10px;
 }
+
+/* stays at the left when the tabs scroll */
+.sidebar-toggle {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  align-self: center;
+  margin: 0 4px 0 6px;
+  background: var(--bg);
+}
