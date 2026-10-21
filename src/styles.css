@@ -2277,8 +2277,9 @@ input.switch:focus-visible {
 /* centered in the status bar, whatever is left and right of it */
 .status-btn.made-with {
   position: absolute;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
 }
 /* no room in a narrow window: it would cover the connection */
 @media (max-width: 1100px) {
