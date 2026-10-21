@@ -38,6 +38,14 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 - SQL editor: highlighting and keywords for the connection's dialect (PostgreSQL, MySQL, MariaDB, SQLite), autocomplete for schemas, tables and columns
 - `Ctrl/⌘ Enter` runs the selection or the statement under the cursor; `Ctrl/⌘ Shift Enter` runs everything
 - Several statements: one result per statement; row count and timing; errors show the database's message, detail, hint and code (SQLSTATE for Postgres), and underline the failing token
+
+**Export**
+- Export a whole table (every page, with the tab's filters and sort) or a query's result to a file as CSV, JSON or SQL `INSERT`s: the Export button, or "Export…" in the command palette
+- Streamed to disk as rows arrive, so a large table never sits in memory, and with no row limit
+- Saved to Downloads by default (or Browse… for another place); an existing file is only replaced when you say so; cancel any time
+- A failed or cancelled export leaves no partial file, and never damages the file it was replacing
+- CSV: a header row, NULL as an empty field and an empty string as `""`. JSON: an array of objects. SQL: batched `INSERT`s in the connection's dialect that load back unchanged (binary as `X'…'`, MySQL `BIT` as `b'…'`)
+- A query result is exported by running its statement again (in the tab's own session), so only one statement that reads can be exported
 - Each query tab has its own database session: `BEGIN`, `UPDATE`, `COMMIT` run one at a time stay in one transaction, and `SET` or temp tables persist in that tab. Browsing tables uses a separate small pool, so an open transaction never leaks into it
 - Results keep at most 5,000 rows (Settings) and 64 MB; the rest is read and dropped so the statement and the ones after it still finish. Queries can be cancelled at any point
 - Query history, searchable, reopen any query in a new tab
@@ -157,7 +165,9 @@ awkward identifiers, multi-statement queries, error positions, row and byte limi
 table, cancelling and history. The e2e tests drive the UI end to end:
 connection flow, browsing, grid keys and copy formats, queries, palette and sidebar keyboard
 navigation, vim mode in the editor, themes (including custom import), restoring tabs after a
-restart, sessions (disconnect, editing an open connection), and deleting connections.
+restart, sessions (disconnect, editing an open connection), exports (a whole table, a query
+result, replacing a file, cancelling), and deleting connections. The integration tests load SQL
+exports back into each database and compare every column.
 
 ## Project layout
 
@@ -169,6 +179,7 @@ src-tauri/src/
   mysql.rs     MySQL / MariaDB engine
   sqlite.rs    SQLite engine
   results.rs   collecting results: row and byte limits, cancel past the limit
+  export.rs    streaming rows to a CSV, JSON or SQL file
   running.rs   queries in flight and how to cancel them on each engine
   sql.rs       SQL for table browsing per dialect (quoting, filters)
   store.rs     connections.json and history.jsonl
@@ -197,11 +208,11 @@ v0.0.2 lets you reach any database, change data safely, and get data out.
 3. **Edit data with a review step**: edit cells, add and delete rows (tables with a primary
    key). Changes stay pending and highlighted until you review the generated SQL and commit
    them in one transaction; discard drops them all.
-4. **Production safety**: read-only connections (refused in the app and opened as read-only
+4. ✅ **Production safety**: read-only connections (refused in the app and opened as read-only
    transactions); for connections marked as production, a confirmation before `UPDATE` /
    `DELETE` without `WHERE`, `DROP` and `TRUNCATE`; the open-transaction state shown on the
    query tab with Commit / Rollback.
-5. **Export to files**: save a result or a whole table as CSV, JSON or SQL `INSERT`s, streamed
+5. ✅ **Export to files**: save a result or a whole table as CSV, JSON or SQL `INSERT`s, streamed
    to disk so large exports never sit in memory.
 
 ### Should-have

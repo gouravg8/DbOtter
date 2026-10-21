@@ -1,7 +1,8 @@
-import { Braces, CircleAlert, Copy, History, Play, Sheet, Square } from "lucide-react";
+import { Braces, CircleAlert, Copy, Download, History, Play, Sheet, Square } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { codeLabel } from "../lib/dialect";
+import { exportStatement } from "../lib/export";
 import { formatCount, formatDuration, toCsv, toJson } from "../lib/format";
 import { MOD, modKey, useApp, type QueryTab as QueryTabState } from "../lib/store";
 import { ConnectionPicker } from "./ConnectionPicker";
@@ -51,6 +52,24 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
   // switching land here
   useLayoutEffect(() => {
     if (active) editor.current?.focus();
+  }, [active]);
+
+  // the shown result, run again in this tab's session and written to a file
+  const openExport = () => {
+    const { toast, setDialog } = useApp.getState();
+    if (!tab.connId || !tab.output || !tab.outputSql || !tab.output.results[tab.activeResult]?.hasRows)
+      return toast("Run a query that returns rows first", "error");
+    const sql = exportStatement(tab.outputSql, tab.output.results.length, tab.activeResult);
+    if (!sql) return toast("Run just the query to export (this run had several statements)", "error");
+    setDialog({ kind: "export", target: { kind: "sql", connId: tab.connId, sql, name: "query-result", editor: tab.id } });
+  };
+  const exportRef = useRef(openExport);
+  exportRef.current = openExport;
+  useEffect(() => {
+    if (!active) return;
+    const onExport = () => exportRef.current();
+    window.addEventListener("dbotter:export", onExport);
+    return () => window.removeEventListener("dbotter:export", onExport);
   }, [active]);
 
   useEffect(() => {
@@ -297,6 +316,9 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
                   </button>
                   <button type="button" className="btn ghost small" title="Copy column names" aria-label="Copy column names" onClick={() => copyText(result.columns.join(", "), "Copied column names")}>
                     <Copy size={13} /> <span className="btn-label">Columns</span>
+                  </button>
+                  <button type="button" className="btn small" title="Export every row to a file (runs the query again, past the row limit)" aria-label="Export to a file" disabled={!!tab.running} onClick={openExport}>
+                    <Download size={13} /> <span className="btn-label">Export…</span>
                   </button>
                 </>
               )}

@@ -30,6 +30,8 @@ async fn api(app: tauri::State<'_, App>, cmd: String, args: Option<Value>) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // the save-file dialog for exports
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let store = store::Store::new(dir).map_err(|e| e.message)?;

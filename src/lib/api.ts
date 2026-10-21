@@ -173,6 +173,32 @@ export interface TableRows {
   durationMs: number;
 }
 
+export type ExportFormat = "csv" | "json" | "sql";
+
+export type ExportSource = { kind: "table"; query: TableQuery } | { kind: "sql"; sql: string };
+
+export interface ExportArgs {
+  id: string;
+  queryId: string;
+  source: ExportSource;
+  format: ExportFormat;
+  /** Absolute, or starting with `~/`. */
+  path: string;
+  /** Replace an existing file; without it, an existing one fails with code `exists`. */
+  overwrite?: boolean;
+  /** Table name for SQL INSERTs. */
+  target?: string;
+  /** Query tab id: run on the tab's own connection. */
+  editor?: string;
+}
+
+export interface ExportResult {
+  path: string;
+  rows: number;
+  bytes: number;
+  durationMs: number;
+}
+
 export interface HistoryEntry {
   id: string;
   connectionId: string;
@@ -184,7 +210,7 @@ export interface HistoryEntry {
 }
 
 const BRIDGE: string | undefined = import.meta.env.VITE_DBOTTER_BRIDGE;
-const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /** Normalizes anything thrown into an AppError. */
 export function toAppError(e: unknown): AppError {
@@ -234,6 +260,10 @@ export const api = {
   releaseEditor: (editor: string) => call<void>("editor_release", { editor }),
   transactionStatus: (id: string, editor: string) => call<TxState>("transaction_status", { id, editor }),
   cancel: (queryId: string) => call<boolean>("cancel_query", { queryId }),
+  /** Streams every row to a file; cancel with `cancel(queryId)`. */
+  export: (args: ExportArgs) => call<ExportResult>("export", args),
+  /** Default folder for exports (Downloads, else home). */
+  exportDir: () => call<string>("export_dir"),
   history: (limit = 300) => call<HistoryEntry[]>("history_list", { limit }),
   clearHistory: () => call<void>("history_clear"),
 };

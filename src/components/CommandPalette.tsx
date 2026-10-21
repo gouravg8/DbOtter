@@ -1,4 +1,5 @@
 import {
+  Download,
   Eye,
   History,
   Keyboard,
@@ -70,6 +71,15 @@ export function CommandPalette({ mode }: { mode: "all" | "tables" }) {
           out.push({ id: "close-others", label: "Close other tabs", group: "Actions", icon: <X size={14} />, run: () => state.closeTabs(others, active) });
         out.push({ id: "close-all", label: "Close all tabs", group: "Actions", icon: <X size={14} />, run: () => state.closeTabs(state.tabs.map((t) => t.id)) });
       }
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if ((tab?.kind === "table" && tab.view === "data") || (tab?.kind === "query" && tab.output && !tab.running))
+        out.push({
+          id: "export",
+          label: tab.kind === "table" ? "Export table to a file" : "Export result to a file",
+          group: "Actions",
+          icon: <Download size={14} />,
+          run: () => window.dispatchEvent(new Event("dbotter:export")),
+        });
       if (state.closedTabs.length)
         out.push({ id: "reopen", label: "Reopen closed tab", group: "Actions", icon: <History size={14} />, hint: `${MOD} Shift T`, run: () => state.reopenClosedTab() });
       if (curConn && state.sessions[curConn.id]?.status === "connected")

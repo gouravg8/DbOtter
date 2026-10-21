@@ -2,6 +2,9 @@
  * Needs the `shop` test database (scripts/seed-test-db.sql) on DBOTTER_TEST_PORT, with a
  * trust-auth `postgres` role and a password-auth `otter` role (password `otter-pass`).
  */
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 const PORT = Number(process.env.DBOTTER_TEST_PORT ?? 0);
@@ -719,4 +722,76 @@ test("dialogs: text can be selected; input text gets the whole box", async ({ pa
     return { line: parseFloat(s.lineHeight), inner: i.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom) };
   });
   expect(box.line).toBe(box.inner);
+});
+
+test("export: a whole table, a query result, replace, cancel", async ({ page }) => {
+  const dir = mkdtempSync(join(tmpdir(), "dbotter-e2e-export-"));
+  await open(page);
+  await connect(page);
+  await page.locator(".tree-row", { hasText: "customers" }).click();
+  // sorted newest first: the export keeps the sort and has every page
+  await pane(page).locator(".grid-hcell", { hasText: "id" }).first().click();
+  await pane(page).locator(".grid-hcell", { hasText: "id" }).first().click();
+  await expect(pane(page).locator(".grid-row").first().locator(".grid-cell").first()).toHaveText("2501");
+  await pane(page).getByRole("button", { name: "Export" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Every row of public.customers, sorted by id");
+  const file = dialog.getByLabel("File");
+  await expect(file).toHaveValue(/[/\\]customers\.csv$/);
+  await dialog.getByRole("radio", { name: "JSON" }).click();
+  await expect(file).toHaveValue(/customers\.json$/);
+  await dialog.getByRole("radio", { name: "CSV" }).click();
+  const csv = join(dir, "customers.csv");
+  await file.fill(csv);
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(page.locator(".toast", { hasText: "Exported 2,501 rows" })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  const lines = readFileSync(csv, "utf8").trimEnd().split("\n");
+  expect(lines.length).toBe(2502);
+  expect(lines[0]).toMatch(/^id,name,email,/);
+  expect(lines[1]).toMatch(/^2501,"O'Brien ""the 50%_off"" guy",/);
+
+  // the same file again: asks before replacing
+  await page.keyboard.press("Control+Shift+P");
+  await page.keyboard.type("export table");
+  await page.keyboard.press("Enter");
+  await dialog.getByLabel("File").fill(csv);
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(dialog).toContainText("already exists");
+  await dialog.getByRole("button", { name: "Replace file" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // a query result as SQL INSERTs
+  await page.keyboard.press("Control+t");
+  const editor = pane(page).locator(".cm-content");
+  await editor.click();
+  await page.keyboard.type("select id, name from customers where id <= 3 order by id");
+  await page.keyboard.press("Control+Enter");
+  await expect(pane(page).locator(".results-foot")).toContainText("3 rows");
+  await pane(page).getByRole("button", { name: "Export to a file" }).click();
+  await dialog.getByRole("radio", { name: "SQL INSERTs" }).click();
+  await dialog.getByLabel("Table name in the INSERTs").fill("people");
+  const sql = join(dir, "people.sql");
+  await dialog.getByLabel("File").fill(sql);
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(page.locator(".toast", { hasText: "Exported 3 rows" })).toBeVisible();
+  expect(readFileSync(sql, "utf8")).toBe(
+    'INSERT INTO "people" ("id", "name") VALUES\n  (E\'1\', E\'Customer 1\'),\n  (E\'2\', E\'Customer 2\'),\n  (E\'3\', E\'Customer 3\');\n',
+  );
+
+  // a slow one, cancelled: nothing is written
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("select pg_sleep(2) as n");
+  await page.keyboard.press("Control+Enter");
+  await expect(pane(page).locator(".results-foot")).toContainText("1 row", { timeout: 10_000 });
+  await pane(page).getByRole("button", { name: "Export to a file" }).click();
+  await dialog.getByLabel("File").fill(join(dir, "slow.csv"));
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(dialog).toContainText("Exporting…");
+  await dialog.getByRole("button", { name: "Cancel export" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("canceling statement");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(readdirSync(dir).sort()).toEqual(["customers.csv", "people.sql"]);
+  rmSync(dir, { recursive: true });
 });

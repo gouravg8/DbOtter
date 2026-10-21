@@ -4,6 +4,7 @@ import {
   ChevronsLeft,
   CircleAlert,
   Columns3,
+  Download,
   Filter as FilterIcon,
   Plus,
   RefreshCw,
@@ -96,6 +97,17 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
     }),
     [tab.schema, tab.table, pageSize, offset, sort, applied],
   );
+
+  // every row with the filters and sort shown (the backend drops the paging)
+  const openExport = useCallback(
+    () => useApp.getState().setDialog({ kind: "export", target: { kind: "table", connId: tab.connId, query: query() } }),
+    [tab.connId, query],
+  );
+  useEffect(() => {
+    if (!active) return;
+    window.addEventListener("dbotter:export", openExport);
+    return () => window.removeEventListener("dbotter:export", openExport);
+  }, [active, openExport]);
 
   useEffect(() => {
     if (!shown || !connected || tab.view !== "data") return;
@@ -236,6 +248,11 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
         {tab.view === "data" && (
           <button type="button" className={`btn ${filtered ? "active" : ""}`} onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} title={`Filter rows (${MOD} F)`}>
             <FilterIcon size={13} /> Filter{filtered ? ` · ${applied.filters.length + (applied.where ? 1 : 0)}` : ""}
+          </button>
+        )}
+        {tab.view === "data" && (
+          <button type="button" className="btn" onClick={openExport} title="Export every row to a file (CSV, JSON, SQL)">
+            <Download size={13} /> Export
           </button>
         )}
         <button

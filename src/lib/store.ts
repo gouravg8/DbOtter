@@ -10,6 +10,7 @@ import {
   type QueryOutput,
   type RelationKind,
   type SchemaTree,
+  type TableQuery,
   type SessionInfo,
   type TxState,
 } from "./api";
@@ -44,6 +45,8 @@ export interface QueryTab {
   /** Set while a query runs; `sent` once the SQL went to the server (before: still connecting). */
   running?: { queryId: string; startedAt: number; sent?: boolean };
   output?: QueryOutput;
+  /** The SQL that produced `output` (for exporting a result). */
+  outputSql?: string;
   /** `offset`: where the executed text started in the editor; `sql`: that text. */
   error?: AppError & { offset: number; sql: string };
   activeResult: number;
@@ -76,7 +79,14 @@ export type DialogState =
   | { kind: "palette"; mode: "all" | "tables" }
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
   | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }
+  | { kind: "export"; target: ExportTarget }
   | null;
+
+/** What an export dialog writes: a table tab's rows (all pages, its filters and sort) or a
+ * query tab's result, run again. */
+export type ExportTarget =
+  | { kind: "table"; connId: string; query: TableQuery }
+  | { kind: "sql"; connId: string; sql: string; name: string; editor: string };
 
 export interface Toast {
   id: string;
@@ -375,7 +385,7 @@ export const useApp = create<State>()(
         }
         const rest = tabs.filter((t) => t.id !== id);
         const activeTabId = get().activeTabId === id ? (rest[i] ?? rest[i - 1])?.id ?? null : get().activeTabId;
-        const closed: Tab = tab.kind === "query" ? { ...tab, running: undefined, output: undefined, error: undefined } : tab;
+        const closed: Tab = tab.kind === "query" ? { ...tab, running: undefined, output: undefined, outputSql: undefined, error: undefined } : tab;
         set({ tabs: rest, activeTabId, closedTabs: [...get().closedTabs, closed].slice(-10) });
       },
 
@@ -474,7 +484,7 @@ export const useApp = create<State>()(
           // show the last result that has rows (or the last statement's count)
           const withRows = output.results.map((r, i) => (r.hasRows ? i : -1)).filter((i) => i >= 0);
           const activeResult = withRows.length ? withRows.at(-1)! : Math.max(0, output.results.length - 1);
-          get().updateTab(tabId, { running: undefined, output, activeResult });
+          get().updateTab(tabId, { running: undefined, output, outputSql: sql, activeResult });
           void get().refreshTx(tabId);
           // DDL changes what the sidebar and autocomplete should show
           if (/\b(create|alter|drop|rename|truncate|comment)\b/i.test(sql)) void get().refreshSchema(connId);
@@ -552,7 +562,7 @@ export const useApp = create<State>()(
       partialize: (s) => ({
         settings: s.settings,
         tabs: s.tabs.map((t) =>
-          t.kind === "query" ? { ...t, running: undefined, output: undefined, error: undefined, tx: undefined } : t,
+          t.kind === "query" ? { ...t, running: undefined, output: undefined, outputSql: undefined, error: undefined, tx: undefined } : t,
         ),
         activeTabId: s.activeTabId,
         lastConnId: s.lastConnId,
