@@ -362,6 +362,7 @@ body.col-resize * {
 }
 .brand {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 8px;
   font-size: 13.5px;
@@ -695,6 +696,7 @@ body.col-resize * {
 /* ---------- status bar ---------- */
 
 .statusbar {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -716,6 +718,9 @@ body.col-resize * {
   text-overflow: ellipsis;
 }
 .status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 18px;
   padding: 0 6px;
   font-size: 11.5px;
@@ -2090,24 +2095,6 @@ pre.crash {
   word-break: break-word;
 }
 
-/* ---------- settings: about ---------- */
-
-.about p {
-  margin: 0 0 8px;
-}
-.about-list {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 4px 12px;
-  margin: 0;
-  font-size: 12.5px;
-}
-.about-list dt {
-  color: var(--muted);
-}
-.about-list dd {
-  margin: 0;
-}
 .ext-link {
   display: inline-flex;
   align-items: center;
@@ -2117,4 +2104,196 @@ pre.crash {
 }
 .ext-link:hover {
   text-decoration: underline;
+}
+
+/* ---------- settings: tabs ---------- */
+
+.settings .modal-body {
+  padding: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+}
+.settings-layout {
+  display: flex;
+  height: min(560px, 72vh);
+}
+.settings-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  width: 180px;
+  padding: 10px 8px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.settings-tab:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.settings-tab.active {
+  color: var(--fg);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.settings-tab.active svg {
+  color: var(--accent);
+}
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  padding: 18px 22px 22px;
+  overflow: auto;
+}
+.settings-pane h3:not(:first-child) {
+  margin-top: 26px;
+}
+.settings-pane .row-actions {
+  margin-top: 12px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.setting-text {
+  flex: 1;
+  min-width: 0;
+}
+.setting-title {
+  font-weight: 550;
+}
+.setting-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.setting-control {
+  flex: none;
+}
+.setting-control input:not([type="checkbox"]),
+.setting-control select {
+  width: 120px;
+}
+/* a checkbox drawn as a switch */
+input.switch {
+  appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 0.15s;
+}
+input.switch:checked {
+  background: var(--accent);
+}
+input.switch:checked::after {
+  transform: translateX(14px);
+}
+input.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- about, made with ---------- */
+
+.about {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 18px;
+  text-align: center;
+}
+.about-logo {
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.about-name {
+  margin: 12px 0 2px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.about-tagline {
+  max-width: 380px;
+  margin: 10px 0 18px;
+  color: var(--muted);
+}
+.about-list {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 13px;
+  text-align: left;
+}
+.about-list dt {
+  color: var(--muted);
+  text-align: right;
+}
+.about-list dd {
+  margin: 0;
+}
+.made-with {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.heart {
+  color: #e5484d;
+}
+/* centered in the status bar, whatever is left and right of it */
+.status-btn.made-with {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* no room in a narrow window: it would cover the connection */
+@media (max-width: 1100px) {
+  .status-btn.made-with {
+    display: none;
+  }
+}
+.status-kbd {
+  margin-left: 2px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  color: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.brand-logo {
+  border-radius: 5px;
 }

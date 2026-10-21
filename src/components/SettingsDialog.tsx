@@ -1,9 +1,10 @@
-import { Check, Copy, ExternalLink, Trash2, Upload } from "lucide-react";
+import { Check, Copy, Database, ExternalLink, Heart, Info, Keyboard, Palette, SquareTerminal, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import logo from "../assets/logo.png";
 import { ABOUT } from "../lib/about";
 import { api, toAppError } from "../lib/api";
 import { MONO_FONTS, UI_FONTS, fontStack } from "../lib/fonts";
-import { MOD, useApp } from "../lib/store";
+import { MOD, useApp, type SettingsTab } from "../lib/store";
 import { BUILT_IN_THEMES, SYSTEM_THEME_ID, parseTheme, resolveTheme, themeToJson, type Theme } from "../lib/themes";
 import { Kbd, Modal, copyText } from "./ui";
 
@@ -148,10 +149,31 @@ function ExtLink({ url, children }: { url: string; children: React.ReactNode }) 
   );
 }
 
-export function SettingsDialog({ section }: { section?: "about" }) {
-  const about = useRef<HTMLElement>(null);
+const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
+  { id: "appearance", label: "Appearance", icon: <Palette size={15} /> },
+  { id: "editor", label: "Editor", icon: <SquareTerminal size={15} /> },
+  { id: "data", label: "Data", icon: <Database size={15} /> },
+  { id: "shortcuts", label: "Shortcuts", icon: <Keyboard size={15} /> },
+  { id: "about", label: "About", icon: <Info size={15} /> },
+];
+
+/** One setting: what it is on the left, its control on the right. */
+function Row({ title, desc, children }: { title: string; desc?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="setting-row">
+      <div className="setting-text">
+        <div className="setting-title">{title}</div>
+        {desc && <div className="setting-desc">{desc}</div>}
+      </div>
+      <div className="setting-control">{children}</div>
+    </div>
+  );
+}
+
+export function SettingsDialog({ section }: { section?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(section ?? "appearance");
   useEffect(() => {
-    if (section === "about") about.current?.scrollIntoView({ block: "start" });
+    if (section) setTab(section);
   }, [section]);
   const settings = useApp((s) => s.settings);
   const { setSettings, setDialog, toast } = useApp.getState();
@@ -172,153 +194,179 @@ export function SettingsDialog({ section }: { section?: "about" }) {
   };
 
   return (
-    <Modal title="Settings" onClose={() => setDialog(null)} width={720} className="settings">
-      <section>
-        <h3>Theme</h3>
-        <div className="theme-grid">
-          <button
-            type="button"
-            className={`theme-card system ${settings.themeId === SYSTEM_THEME_ID ? "selected" : ""}`}
-            onClick={() => setSettings({ themeId: SYSTEM_THEME_ID })}
-            aria-pressed={settings.themeId === SYSTEM_THEME_ID}
-          >
-            <span className="theme-preview split">
-              <span style={{ background: BUILT_IN_THEMES[0].colors.surface }} />
-              <span style={{ background: BUILT_IN_THEMES[1].colors.surface }} />
-            </span>
-            <span className="theme-name">
-              {settings.themeId === SYSTEM_THEME_ID && <Check size={12} />} System
-            </span>
-          </button>
-          {[...BUILT_IN_THEMES, ...settings.customThemes].map((t) => (
-            <ThemeCard
+    <Modal title="Settings" onClose={() => setDialog(null)} width={820} className="settings">
+      <div className="settings-layout">
+        <nav className="settings-nav" role="tablist" aria-label="Settings" aria-orientation="vertical">
+          {TABS.map((t) => (
+            <button
               key={t.id}
-              theme={t}
-              selected={settings.themeId === t.id}
-              onPick={() => setSettings({ themeId: t.id })}
-              onDelete={
-                t.custom
-                  ? () =>
-                      setSettings({
-                        customThemes: settings.customThemes.filter((x) => x.id !== t.id),
-                        themeId: settings.themeId === t.id ? SYSTEM_THEME_ID : settings.themeId,
-                      })
-                  : undefined
-              }
-            />
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`settings-tab ${tab === t.id ? "active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.icon} {t.label}
+            </button>
           ))}
-        </div>
-        <div className="row-actions">
-          <button type="button" className="btn small" onClick={() => file.current?.click()}>
-            <Upload size={13} /> Import theme (.json)
-          </button>
-          <button type="button" className="btn ghost small" onClick={() => copyText(themeToJson(current), "Theme JSON copied: edit it, save as .json, import")}>
-            <Copy size={13} /> Copy "{current.name}" as JSON
-          </button>
-          <input
-            ref={file}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void importTheme(f);
-              e.target.value = "";
-            }}
-          />
-        </div>
-        {importError && <div className="test-result bad">{importError}</div>}
-        <p className="muted small">
-          A theme file is <code>{"{ \"name\", \"appearance\": \"dark\" | \"light\", \"colors\": { … } }"}</code>. Colors you leave out come from
-          Otter Light or Dark.
-        </p>
-      </section>
+        </nav>
 
-      <section>
-        <h3>Editor</h3>
-        <label className="check">
-          <input type="checkbox" checked={settings.vim} onChange={(e) => setSettings({ vim: e.target.checked })} />
-          Vim mode <span className="muted small">(editor keys, plus h j k l, gg, G, y in grids and the sidebar)</span>
-        </label>
-      </section>
-
-      <section>
-        <h3>Fonts</h3>
-        <FontField
-          label="Interface"
-          value={settings.uiFont}
-          options={UI_FONTS}
-          fallback="--ui-default"
-          placeholder="Default (system font)"
-          onChange={(uiFont) => setSettings({ uiFont })}
-        />
-        <FontField
-          label="Editor and grid"
-          value={settings.monoFont}
-          options={MONO_FONTS}
-          fallback="--mono-default"
-          placeholder="Default (JetBrains Mono, Fira Code…)"
-          onChange={(monoFont) => setSettings({ monoFont })}
-        />
-        <label className="field inline">
-          <span>Editor and grid size</span>
-          <NumberField value={settings.fontSize} min={10} max={22} onCommit={(fontSize) => setSettings({ fontSize })} />
-        </label>
-        <p className="muted small">Type the name of any font installed on your computer. One that isn't installed falls back to the default.</p>
-      </section>
-
-      <section>
-        <h3>Data</h3>
-        <label className="field inline">
-          <span>Max rows per query result</span>
-          <NumberField value={settings.maxRows} min={100} max={1_000_000} step={1000} onCommit={(maxRows) => setSettings({ maxRows })} />
-        </label>
-        <label className="field inline">
-          <span>Rows per table page</span>
-          <select value={settings.pageSize} onChange={(e) => setSettings({ pageSize: Number(e.target.value) })}>
-            {[50, 100, 200, 500, 1000, 5000].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
-
-      <section>
-        <h3>Keyboard shortcuts</h3>
-        <div className="shortcuts">
-          {SHORTCUTS.map(([k, v]) => (
-            <div key={k} className="shortcut">
-              <span>{v}</span>
-              <span>
-                {k.split(" ").map((p, i) => (
-                  <Kbd key={i}>{p}</Kbd>
+        <div className="settings-pane" role="tabpanel">
+          {tab === "appearance" && (
+            <>
+              <h3>Theme</h3>
+              <div className="theme-grid">
+                <button
+                  type="button"
+                  className={`theme-card system ${settings.themeId === SYSTEM_THEME_ID ? "selected" : ""}`}
+                  onClick={() => setSettings({ themeId: SYSTEM_THEME_ID })}
+                  aria-pressed={settings.themeId === SYSTEM_THEME_ID}
+                >
+                  <span className="theme-preview split">
+                    <span style={{ background: BUILT_IN_THEMES[0].colors.surface }} />
+                    <span style={{ background: BUILT_IN_THEMES[1].colors.surface }} />
+                  </span>
+                  <span className="theme-name">
+                    {settings.themeId === SYSTEM_THEME_ID && <Check size={12} />} System
+                  </span>
+                </button>
+                {[...BUILT_IN_THEMES, ...settings.customThemes].map((t) => (
+                  <ThemeCard
+                    key={t.id}
+                    theme={t}
+                    selected={settings.themeId === t.id}
+                    onPick={() => setSettings({ themeId: t.id })}
+                    onDelete={
+                      t.custom
+                        ? () =>
+                            setSettings({
+                              customThemes: settings.customThemes.filter((x) => x.id !== t.id),
+                              themeId: settings.themeId === t.id ? SYSTEM_THEME_ID : settings.themeId,
+                            })
+                        : undefined
+                    }
+                  />
                 ))}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="btn small" onClick={() => file.current?.click()}>
+                  <Upload size={13} /> Import theme (.json)
+                </button>
+                <button type="button" className="btn ghost small" onClick={() => copyText(themeToJson(current), "Theme JSON copied: edit it, save as .json, import")}>
+                  <Copy size={13} /> Copy "{current.name}" as JSON
+                </button>
+                <input
+                  ref={file}
+                  type="file"
+                  accept="application/json,.json"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void importTheme(f);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              {importError && <div className="test-result bad">{importError}</div>}
+              <p className="muted small">
+                A theme file is <code>{"{ \"name\", \"appearance\": \"dark\" | \"light\", \"colors\": { … } }"}</code>. Colors you leave out
+                come from Otter Light or Dark.
+              </p>
 
-      <section ref={about} className="about">
-        <h3>About</h3>
-        <p>
-          <b>DbOtter</b> {ABOUT.version} · a fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite.
-        </p>
-        <dl className="about-list">
-          <dt>Made by</dt>
-          <dd>{ABOUT.author}</dd>
-          <dt>X (Twitter)</dt>
-          <dd>
-            <ExtLink url={ABOUT.x.url}>@{ABOUT.x.handle}</ExtLink>
-          </dd>
-          <dt>Source</dt>
-          <dd>
-            <ExtLink url={ABOUT.repo.url}>{ABOUT.repo.name}</ExtLink>
-          </dd>
-        </dl>
-      </section>
+              <h3>Fonts</h3>
+              <FontField
+                label="Interface"
+                value={settings.uiFont}
+                options={UI_FONTS}
+                fallback="--ui-default"
+                placeholder="Default (system font)"
+                onChange={(uiFont) => setSettings({ uiFont })}
+              />
+              <FontField
+                label="Editor and grid"
+                value={settings.monoFont}
+                options={MONO_FONTS}
+                fallback="--mono-default"
+                placeholder="Default (JetBrains Mono, Fira Code…)"
+                onChange={(monoFont) => setSettings({ monoFont })}
+              />
+              <Row title="Editor and grid size" desc="Text size in the SQL editor and result grids.">
+                <NumberField value={settings.fontSize} min={10} max={22} onCommit={(fontSize) => setSettings({ fontSize })} />
+              </Row>
+              <p className="muted small">Type the name of any font installed on your computer. One that isn't installed falls back to the default.</p>
+            </>
+          )}
+
+          {tab === "editor" && (
+            <>
+              <h3>Editor</h3>
+              <Row title="Vim mode" desc="Vim keys in the SQL editor, plus h j k l, gg, G and y in grids and the sidebar.">
+                <input type="checkbox" className="switch" checked={settings.vim} aria-label="Vim mode" onChange={(e) => setSettings({ vim: e.target.checked })} />
+              </Row>
+            </>
+          )}
+
+          {tab === "data" && (
+            <>
+              <h3>Data</h3>
+              <Row title="Max rows per query result" desc="Rows kept from a query; the rest aren't fetched. Exports always get every row.">
+                <NumberField value={settings.maxRows} min={100} max={1_000_000} step={1000} onCommit={(maxRows) => setSettings({ maxRows })} />
+              </Row>
+              <Row title="Rows per table page" desc="How many rows a table tab loads at a time.">
+                <select value={settings.pageSize} onChange={(e) => setSettings({ pageSize: Number(e.target.value) })} aria-label="Rows per table page">
+                  {[50, 100, 200, 500, 1000, 5000].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+            </>
+          )}
+
+          {tab === "shortcuts" && (
+            <>
+              <h3>Keyboard shortcuts</h3>
+              <div className="shortcuts">
+                {SHORTCUTS.map(([k, v]) => (
+                  <div key={k} className="shortcut">
+                    <span>{v}</span>
+                    <span>
+                      {k.split(" ").map((p, i) => (
+                        <Kbd key={i}>{p}</Kbd>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {tab === "about" && (
+            <div className="about">
+              <img src={logo} alt="" className="about-logo" width={64} height={64} />
+              <h2 className="about-name">DbOtter</h2>
+              <div className="muted">Version {ABOUT.version}</div>
+              <p className="about-tagline">A fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite.</p>
+              <dl className="about-list">
+                <dt>Made by</dt>
+                <dd>{ABOUT.author}</dd>
+                <dt>X (Twitter)</dt>
+                <dd>
+                  <ExtLink url={ABOUT.x.url}>@{ABOUT.x.handle}</ExtLink>
+                </dd>
+                <dt>Source</dt>
+                <dd>
+                  <ExtLink url={ABOUT.repo.url}>{ABOUT.repo.name}</ExtLink>
+                </dd>
+              </dl>
+              <p className="made-with">
+                Made with <Heart size={12} className="heart" fill="currentColor" /> by {ABOUT.author}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </Modal>
   );
 }

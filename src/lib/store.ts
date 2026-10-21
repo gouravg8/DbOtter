@@ -79,7 +79,7 @@ export type Tab = QueryTab | TableTab | HistoryTab;
 export type DialogState =
   | { kind: "connection"; conn?: ConnectionConfig }
   | { kind: "password"; connId: string; error?: string }
-  | { kind: "settings"; section?: "about" }
+  | { kind: "settings"; section?: SettingsTab }
   | { kind: "palette"; mode: "all" | "tables" }
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
   | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }
@@ -92,6 +92,8 @@ export type DialogState =
 export type ExportTarget =
   | { kind: "table"; connId: string; query: TableQuery }
   | { kind: "sql"; connId: string; sql: string; name: string; editor: string };
+
+export type SettingsTab = "appearance" | "editor" | "data" | "shortcuts" | "about";
 
 export interface Toast {
   id: string;

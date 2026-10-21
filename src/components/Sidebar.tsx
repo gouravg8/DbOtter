@@ -3,7 +3,6 @@
  * h/← collapse or go to parent, Enter opens, s opens structure, / searches.
  */
 import {
-  Lock,
   ChevronDown,
   ChevronRight,
   Columns3,
@@ -12,17 +11,20 @@ import {
   Eye,
   Folder,
   Layers,
+  Lock,
   Pencil,
   Plug,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   SquareTerminal,
   Table,
   Trash2,
   Unplug,
   X,
 } from "lucide-react";
+import logo from "../assets/logo.png";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionConfig, RelationKind, RelationNode } from "../lib/api";
 import { qualified } from "../lib/dialect";
@@ -206,14 +208,12 @@ export function Sidebar() {
     <aside className="sidebar" style={{ width }}>
       <div className="sidebar-head">
         <span className="brand">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
-            <circle cx="12" cy="12" r="10" fill="var(--accent)" />
-            <circle cx="9" cy="10.5" r="1.4" fill="var(--accent-fg)" />
-            <circle cx="15" cy="10.5" r="1.4" fill="var(--accent-fg)" />
-            <ellipse cx="12" cy="14.2" rx="2.2" ry="1.5" fill="var(--accent-fg)" />
-          </svg>
+          <img src={logo} alt="" width={20} height={20} className="brand-logo" />
           DbOtter
         </span>
+        <button type="button" className="icon-btn" title="Settings" aria-label="Settings" onClick={() => app.setDialog({ kind: "settings" })}>
+          <Settings size={15} />
+        </button>
         <button type="button" className="icon-btn" title="New connection" onClick={() => app.setDialog({ kind: "connection" })}>
           <Plus size={16} />
         </button>

@@ -1,5 +1,5 @@
 /** Tab bar, status bar and toasts. */
-import { CircleAlert, History, Keyboard, Lock, Plus, SquareTerminal, Table, X } from "lucide-react";
+import { CircleAlert, Command, Heart, History, Keyboard, Lock, Palette, Plus, Settings, SquareTerminal, Table, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { MOD, useApp, type Tab } from "../lib/store";
 import { resolveTheme } from "../lib/themes";
@@ -166,11 +166,22 @@ export function StatusBar() {
           <Keyboard size={12} /> {inQuery && vimMode ? vimMode.toUpperCase() : "VIM"}
         </span>
       )}
-      <button type="button" className="status-btn" onClick={() => useApp.getState().setDialog({ kind: "settings" })}>
-        {theme.name}
+      <button type="button" className="status-btn made-with" title="About DbOtter" onClick={() => useApp.getState().setDialog({ kind: "settings", section: "about" })}>
+        Made with <Heart size={11} className="heart" fill="currentColor" /> by Gourav Soni
       </button>
-      <button type="button" className="status-btn" onClick={() => useApp.getState().setDialog({ kind: "palette", mode: "all" })}>
-        {MOD} Shift P
+      <button type="button" className="status-btn" title="Change the theme" onClick={() => useApp.getState().setDialog({ kind: "settings", section: "appearance" })}>
+        <Palette size={12} /> {theme.name}
+      </button>
+      <button type="button" className="status-btn" title={`Settings (${MOD} ,)`} onClick={() => useApp.getState().setDialog({ kind: "settings" })}>
+        <Settings size={12} /> Settings
+      </button>
+      <button
+        type="button"
+        className="status-btn"
+        title={`Command palette: every action, connection and table (${MOD} Shift P)`}
+        onClick={() => useApp.getState().setDialog({ kind: "palette", mode: "all" })}
+      >
+        <Command size={12} /> Commands <span className="status-kbd">{MOD} Shift P</span>
       </button>
     </footer>
   );
