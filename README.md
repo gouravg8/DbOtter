@@ -1,12 +1,25 @@
 # DbOtter
 
 A fast, keyboard-first database client for **PostgreSQL**, **MySQL / MariaDB** and
-**SQLite**. **v0.0.1**
+**SQLite**. **v0.0.2**
 
 Tauri v2 + Rust backend, React + CodeMirror 6 frontend. It uses the operating system's own
 webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 
-## Features (v0.0.1)
+## Download
+
+From [Releases](https://github.com/gouravg8/DbOtter/releases):
+
+- **Windows**: `DbOtter_<version>_x64-setup.exe` installs for your user (no admin rights) and
+  adds DbOtter to the Start menu and search; `.msi` for managed installs. The app isn't
+  code-signed yet, so Windows may say "Windows protected your PC": More info → Run anyway.
+- **Ubuntu / Debian**: `sudo apt install ./DbOtter_<version>_amd64.deb`, or make the
+  `.AppImage` executable and run it (any distribution).
+
+Builds come from `.github/workflows/build.yml`: pushing a `v*` tag builds both and makes a
+draft release; Actions → Build → Run workflow builds without releasing.
+
+## Features
 
 **Databases**
 - PostgreSQL (10 and newer), MySQL / MariaDB, and SQLite files, all with the same features
