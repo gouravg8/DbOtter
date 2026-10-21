@@ -47,14 +47,14 @@ function useShortcuts() {
       const inEditor = !!(e.target as HTMLElement | null)?.closest?.(".cm-editor");
       if (inEditor && s.settings.vim && e.ctrlKey && !e.shiftKey && VIM_KEYS.has(k)) return;
       // the palette moves its selection with Ctrl+K / Ctrl+P (Ctrl+N / Ctrl+J too)
-      if (s.dialog?.kind === "palette" && e.ctrlKey && !isMac && (k === "k" || k === "p")) return;
+      if (s.dialog?.kind === "palette" && e.ctrlKey && !e.shiftKey && !isMac && (k === "k" || k === "p")) return;
 
       if (e.ctrlKey && e.key === "Tab") {
         e.preventDefault();
         return s.cycleTab(e.shiftKey ? -1 : 1);
       }
       if (!mod) return;
-      if (k === "k") s.setDialog(s.dialog?.kind === "palette" ? null : { kind: "palette", mode: "all" });
+      if (k === "p" && e.shiftKey) s.setDialog(s.dialog?.kind === "palette" ? null : { kind: "palette", mode: "all" });
       else if (k === "p") s.setDialog({ kind: "palette", mode: "tables" });
       else if (s.dialog) return;
       else if (k === "t" && e.shiftKey) s.reopenClosedTab();
@@ -105,7 +105,7 @@ function useShortcuts() {
         e.stopPropagation();
       }
     };
-    // capture: runs before the editor swallows Ctrl+K etc.
+    // capture: runs before the editor swallows Ctrl+Shift+P etc.
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("keydown", guardHiddenTabs, true);
     window.addEventListener("keydown", guardOverlays, true);
@@ -169,7 +169,7 @@ function Welcome() {
         )}
       </div>
       <div className="welcome-keys">
-        <span><Kbd>{MOD}</Kbd> <Kbd>K</Kbd> commands</span>
+        <span><Kbd>{MOD}</Kbd> <Kbd>Shift</Kbd> <Kbd>P</Kbd> commands</span>
         <span><Kbd>{MOD}</Kbd> <Kbd>P</Kbd> go to table</span>
         <span><Kbd>{MOD}</Kbd> <Kbd>T</Kbd> new query</span>
       </div>

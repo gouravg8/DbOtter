@@ -53,7 +53,7 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 
 | Keys | Action |
 | --- | --- |
-| `Ctrl/⌘ K` | Command palette (actions, connections, tables, themes) |
+| `Ctrl/⌘ Shift P` | Command palette (actions, connections, tables, themes) |
 | `Ctrl/⌘ P` | Go to table |
 | `Ctrl/⌘ T` / `Ctrl/⌘ W` | New query tab / close tab (`:q` in vim mode) |
 | `Ctrl/⌘ Shift T` | Reopen the last closed tab |

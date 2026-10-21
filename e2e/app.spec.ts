@@ -275,7 +275,7 @@ test("keyboard-first: palette, go to table, sidebar, tabs", async ({ page }) => 
   await expect(pane(page).getByRole("tab", { name: "Structure" })).toHaveAttribute("aria-selected", "true");
 
   // palette actions and tab switching
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Control+Shift+P");
   await page.keyboard.type("new query");
   await page.keyboard.press("Enter");
   await expect(page.locator(".tab")).toHaveCount(4);
@@ -292,7 +292,7 @@ test("keyboard-first: palette, go to table, sidebar, tabs", async ({ page }) => 
 test("themes: switch, import a custom one, reject a bad file", async ({ page }) => {
   await open(page);
   const bg = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--surface").trim());
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Control+Shift+P");
   await page.keyboard.type("catppuccin mocha");
   await page.keyboard.press("Enter");
   await expect.poll(bg).toBe("#1e1e2e");
@@ -418,13 +418,21 @@ test("sessions: disconnect sticks, edited connections reconnect, odd URLs don't 
   await page.keyboard.press("Escape");
 
   // in the palette Ctrl+K / Ctrl+P move the selection instead of toggling
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Control+Shift+P");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Control+k");
   await expect(page.locator(".palette")).toBeVisible();
   await expect(page.locator(".palette-item").nth(1)).toHaveClass(/active/);
   await page.keyboard.press("Escape");
+  await expect(page.locator(".palette")).toHaveCount(0);
+
+  // Ctrl+Shift+P opens and closes it; Ctrl+K no longer does
+  await page.keyboard.press("Control+k");
+  await expect(page.locator(".palette")).toHaveCount(0);
+  await page.keyboard.press("Control+Shift+P");
+  await expect(page.locator(".palette-input input")).toHaveAttribute("placeholder", /command/);
+  await page.keyboard.press("Control+Shift+P");
   await expect(page.locator(".palette")).toHaveCount(0);
 });
 
@@ -447,7 +455,7 @@ test("keys: F5 refreshes, no reloads from dialogs, viewer copy, grid Tab, settin
   await page.keyboard.press("Control+r");
   await page.keyboard.press("F5");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Control+Shift+P");
   await page.keyboard.press("Control+r");
   await page.keyboard.press("Escape");
   expect(await page.evaluate(() => (window as unknown as { marker?: number }).marker)).toBe(42);

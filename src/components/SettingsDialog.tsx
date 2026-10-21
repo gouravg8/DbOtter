@@ -5,7 +5,7 @@ import { BUILT_IN_THEMES, SYSTEM_THEME_ID, parseTheme, resolveTheme, themeToJson
 import { Kbd, Modal, copyText } from "./ui";
 
 const SHORTCUTS: [string, string][] = [
-  [`${MOD} K`, "Command palette"],
+  [`${MOD} Shift P`, "Command palette"],
   [`${MOD} P`, "Go to table"],
   [`${MOD} T`, "New query tab"],
   [`${MOD} W`, "Close tab"],

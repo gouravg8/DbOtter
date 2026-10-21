@@ -287,7 +287,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
               <Kbd>{MOD}</Kbd> <Kbd>Shift</Kbd> <Kbd>Enter</Kbd> run everything
             </div>
             <div>
-              <Kbd>{MOD}</Kbd> <Kbd>K</Kbd> command palette
+              <Kbd>{MOD}</Kbd> <Kbd>Shift</Kbd> <Kbd>P</Kbd> command palette
             </div>
             {!tab.connId && <div className="warn">Pick a connection above to run queries.</div>}
           </div>

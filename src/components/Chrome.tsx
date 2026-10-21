@@ -130,7 +130,7 @@ export function StatusBar() {
         {theme.name}
       </button>
       <button type="button" className="status-btn" onClick={() => useApp.getState().setDialog({ kind: "palette", mode: "all" })}>
-        {MOD} K
+        {MOD} Shift P
       </button>
     </footer>
   );
