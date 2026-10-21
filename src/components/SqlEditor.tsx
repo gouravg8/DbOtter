@@ -2,10 +2,19 @@
  * CodeMirror 6 SQL editor. Colors come from the theme's CSS variables, autocomplete from
  * the connected schema, and vim mode is a compartment toggled from settings.
  */
-import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, closeCompletion, completionKeymap } from "@codemirror/autocomplete";
+import {
+  acceptCompletion,
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  closeCompletion,
+  completionKeymap,
+  type Completion,
+  type CompletionSource,
+} from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab, toggleComment } from "@codemirror/commands";
 import { MariaSQL, MySQL, PostgreSQL, SQLite, sql, type SQLDialect, type SQLNamespace } from "@codemirror/lang-sql";
-import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -23,6 +32,7 @@ import { tags as t } from "@lezer/highlight";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { DbKind, SchemaTree } from "../lib/api";
 import { useApp } from "../lib/store";
+import { expectsTable, tablesInStatement } from "../lib/sqlscope";
 import { statementAt } from "../lib/sqlsplit";
 
 export interface SqlEditorHandle {
@@ -148,8 +158,51 @@ function dialectFor(kind?: DbKind, product?: string): SQLDialect {
   return kind === "sqlite" ? SQLite : PostgreSQL;
 }
 
-const language = (p: Pick<Props, "kind" | "product" | "schema" | "defaultSchema">) =>
-  sql({ dialect: dialectFor(p.kind, p.product), schema: namespace(p.schema), defaultSchema: p.defaultSchema || "public" });
+/**
+ * Columns of the tables the statement under the cursor uses, without a `table.` prefix
+ * (lang-sql only completes columns after one). Ranked above table names.
+ */
+function columnSource(tree: SchemaTree | undefined, defaultSchema: string): CompletionSource {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const find = (schema: string | undefined, table: string) => {
+    const schemas = tree?.schemas ?? [];
+    const inSchema = (s?: (typeof schemas)[number]) => s?.relations.find((r) => r.name === table) ?? s?.relations.find((r) => same(r.name, table));
+    if (schema) return inSchema(schemas.find((s) => s.name === schema) ?? schemas.find((s) => same(s.name, schema)));
+    return inSchema(schemas.find((s) => s.name === defaultSchema)) ?? schemas.map((s) => inSchema(s)).find(Boolean);
+  };
+  return (ctx) => {
+    if (!tree) return null;
+    const word = ctx.matchBefore(/[\w$\u0080-\uffff]+/);
+    if (!word && !ctx.explicit) return null;
+    const from = word?.from ?? ctx.pos;
+    // after `x.` lang-sql completes that table's columns itself
+    if (ctx.state.sliceDoc(from - 1, from) === ".") return null;
+    const node = syntaxTree(ctx.state).resolveInner(ctx.pos, -1);
+    if (/String|Comment|QuotedIdentifier/.test(node.name)) return null;
+    const doc = ctx.state.doc.toString();
+    const stmt = statementAt(doc, ctx.pos) ?? statementAt(doc, from);
+    const start = stmt && stmt.from <= from ? stmt.from : 0;
+    if (expectsTable(doc.slice(start, from))) return null;
+    const refs = tablesInStatement(stmt?.text ?? doc.slice(start));
+    const seen = new Set<string>();
+    const options: Completion[] = [];
+    for (const r of refs) {
+      const rel = find(r.schema, r.table);
+      for (const c of rel?.columns ?? []) {
+        if (seen.has(c.name)) continue;
+        seen.add(c.name);
+        options.push({ label: c.name, type: "property", detail: `${c.dataType} · ${rel!.name}`, boost: 50 });
+      }
+    }
+    return options.length ? { from, options, validFor: /^[\w$\u0080-\uffff]*$/ } : null;
+  };
+}
+
+const language = (p: Pick<Props, "kind" | "product" | "schema" | "defaultSchema">) => {
+  const defaultSchema = p.defaultSchema || "public";
+  const support = sql({ dialect: dialectFor(p.kind, p.product), schema: namespace(p.schema), defaultSchema });
+  return [support, support.language.data.of({ autocomplete: columnSource(p.schema, defaultSchema) })];
+};
 
 function currentSql(view: EditorView) {
   const { from, to, head } = view.state.selection.main;
