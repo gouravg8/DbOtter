@@ -264,6 +264,8 @@ export const api = {
   export: (args: ExportArgs) => call<ExportResult>("export", args),
   /** Default folder for exports (Downloads, else home). */
   exportDir: () => call<string>("export_dir"),
+  /** Opens the file manager with the file selected. */
+  revealPath: (path: string) => call<void>("reveal_path", { path }),
   history: (limit = 300) => call<HistoryEntry[]>("history_list", { limit }),
   clearHistory: () => call<void>("history_clear"),
 };

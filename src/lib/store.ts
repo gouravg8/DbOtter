@@ -92,6 +92,13 @@ export interface Toast {
   id: string;
   text: string;
   kind: "info" | "error";
+  /** A button on the toast (it then stays longer and can be closed). */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 interface State {
@@ -145,7 +152,8 @@ interface State {
 
   setDialog: (d: DialogState) => void;
   setSidebarOpen: (v: boolean) => void;
-  toast: (text: string, kind?: Toast["kind"]) => void;
+  toast: (text: string, kind?: Toast["kind"], action?: ToastAction) => void;
+  dismissToast: (id: string) => void;
   currentConnId: () => string | null;
 }
 
@@ -534,11 +542,13 @@ export const useApp = create<State>()(
       setDialog: (dialog) => set({ dialog }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
-      toast: (text, kind = "info") => {
-        const t: Toast = { id: newId(), text, kind };
+      toast: (text, kind = "info", action) => {
+        const t: Toast = { id: newId(), text, kind, action };
         set({ toasts: [...get().toasts, t].slice(-4) });
-        setTimeout(() => set({ toasts: get().toasts.filter((x) => x.id !== t.id) }), kind === "error" ? 6000 : 2200);
+        // time to read it and reach for the button
+        setTimeout(() => get().dismissToast(t.id), action ? 10000 : kind === "error" ? 6000 : 2200);
       },
+      dismissToast: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
 
       currentConnId: () => {
         const { tabs, activeTabId, lastConnId, connections } = get();

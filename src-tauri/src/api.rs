@@ -123,6 +123,18 @@ struct HistoryArgs {
     limit: Option<usize>,
 }
 
+/// Opens the file manager with `path` selected.
+async fn reveal(path: std::path::PathBuf) -> AppResult<()> {
+    if !path.exists() {
+        return Err(AppError::new(format!("{} isn't there any more", path.display())));
+    }
+    // talks to the file manager (D-Bus on Linux): keep it off the async threads
+    tokio::task::spawn_blocking(move || tauri_plugin_opener::reveal_item_in_dir(&path))
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?
+        .map_err(|e| AppError::new(format!("Couldn't open the folder: {e}")))
+}
+
 impl App {
     pub fn new(store: Store, secrets: Secrets) -> Self {
         Self { db: Db::new(), store, secrets, session_passwords: Mutex::new(HashMap::new()) }
@@ -191,6 +203,14 @@ impl App {
                 ok(self.db.export(&a.id, &a.query_id, &a.source, file, a.editor.as_deref()).await?)
             }
             "export_dir" => ok(crate::export::default_dir().display().to_string()),
+            "reveal_path" => {
+                #[derive(Deserialize)]
+                struct A {
+                    path: String,
+                }
+                let A { path } = args(a)?;
+                ok(reveal(crate::export::resolve_path(&path)?).await?)
+            }
             "editor_release" => {
                 let EditorArgs { editor } = args(a)?;
                 self.db.release_editor(&editor).await;

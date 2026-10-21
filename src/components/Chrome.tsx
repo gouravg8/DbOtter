@@ -178,11 +178,29 @@ export function StatusBar() {
 
 export function Toasts() {
   const toasts = useApp((s) => s.toasts);
+  const { dismissToast } = useApp.getState();
   return (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>
-          {t.kind === "error" && <CircleAlert size={14} />} {t.text}
+        <div key={t.id} className={`toast ${t.kind} ${t.action ? "has-action" : ""}`}>
+          {t.kind === "error" && <CircleAlert size={14} />} <span className="toast-text">{t.text}</span>
+          {t.action && (
+            <>
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  dismissToast(t.id);
+                  t.action!.run();
+                }}
+              >
+                {t.action.label}
+              </button>
+              <button type="button" className="icon-btn toast-close" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
+                <X size={13} />
+              </button>
+            </>
+          )}
         </div>
       ))}
     </div>

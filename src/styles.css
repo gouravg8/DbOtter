@@ -1891,6 +1891,21 @@ body.col-resize * {
   box-shadow: var(--shadow);
   animation: pop 0.15s ease-out;
 }
+.toast.has-action {
+  pointer-events: auto;
+  padding: 6px 6px 6px 12px;
+}
+.toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast .btn {
+  flex: none;
+}
+.toast-close {
+  flex: none;
+  color: var(--muted);
+}
 .toast.error {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }

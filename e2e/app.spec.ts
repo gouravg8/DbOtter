@@ -744,8 +744,21 @@ test("export: a whole table, a query result, replace, cancel", async ({ page }) 
   const csv = join(dir, "customers.csv");
   await file.fill(csv);
   await dialog.getByRole("button", { name: "Export", exact: true }).click();
-  await expect(page.locator(".toast", { hasText: "Exported 2,501 rows" })).toBeVisible();
+  const toast = page.locator(".toast", { hasText: "Exported 2,501 rows" });
+  await expect(toast).toBeVisible();
   await expect(dialog).toHaveCount(0);
+  // Show in folder asks the backend to open the file manager (stubbed here: no window in tests)
+  const revealed: string[] = [];
+  await page.route("**/api", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body?.cmd !== "reveal_path") return route.continue();
+    revealed.push(body.args.path);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "null" });
+  });
+  await toast.getByRole("button", { name: "Show in folder" }).click();
+  await expect(toast).toHaveCount(0);
+  expect(revealed).toEqual([csv]);
+  await page.unroute("**/api");
   const lines = readFileSync(csv, "utf8").trimEnd().split("\n");
   expect(lines.length).toBe(2502);
   expect(lines[0]).toMatch(/^id,name,email,/);

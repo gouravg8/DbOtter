@@ -85,7 +85,10 @@ export function ExportDialog({ target }: { target: ExportTarget }) {
       });
       if (!open.current) return;
       setDialog(null);
-      toast(`Exported ${formatCount(out.rows)} row${out.rows === 1 ? "" : "s"} (${formatBytes(out.bytes)}) to ${out.path}`);
+      toast(`Exported ${formatCount(out.rows)} row${out.rows === 1 ? "" : "s"} (${formatBytes(out.bytes)}) to ${out.path}`, "info", {
+        label: "Show in folder",
+        run: () => void api.revealPath(out.path).catch((e) => toast(toAppError(e).message, "error")),
+      });
     } catch (e) {
       if (!open.current) return;
       setRunning(null);
