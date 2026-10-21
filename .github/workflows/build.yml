@@ -62,7 +62,9 @@ jobs:
           # a tag makes a draft release with the files; a manual run only builds
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: DbOtter ${{ github.ref_name }}
-          releaseBody: See the README for what's new. Windows may warn "unknown publisher" (the app isn't signed yet): More info → Run anyway.
+          releaseBody: >-
+            See the README for what's new. Windows may warn "unknown publisher" (the app isn't
+            signed yet): More info → Run anyway.
           releaseDraft: true
           args: --bundles ${{ matrix.bundles }}
 
