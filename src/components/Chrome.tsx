@@ -1,5 +1,5 @@
 /** Tab bar, status bar and toasts. */
-import { CircleAlert, History, Keyboard, Plus, SquareTerminal, Table, X } from "lucide-react";
+import { CircleAlert, History, Keyboard, Lock, Plus, SquareTerminal, Table, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { MOD, useApp, type Tab } from "../lib/store";
 import { resolveTheme } from "../lib/themes";
@@ -106,6 +106,12 @@ export function StatusBar() {
         <span className="status-conn">
           <span className="dot" style={{ background: conn.color ?? "var(--subtle)" }} />
           {conn.name}
+          {conn.production && <span className="prod-badge">production</span>}
+          {conn.readOnly && (
+            <span className="ro-badge">
+              <Lock size={10} /> read-only
+            </span>
+          )}
           {session?.status === "connected" && session.info && (
             <span className="muted">
               {" "}

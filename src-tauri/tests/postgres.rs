@@ -525,3 +525,30 @@ async fn structure_details_and_stable_paging() {
     assert_eq!(page["result"]["rows"][1][0], "33");
     assert_eq!(call(&app, "table_count", json!({ "id": id, "queryId": "c", "query": q })).await, 84);
 }
+
+#[tokio::test]
+async fn read_only_connections() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let conn = call(&app, "connection_save", json!({ "input": { "name": "ro", "host": "127.0.0.1", "port": port, "database": "shop",
+        "user": "postgres", "sslMode": "disable", "savePassword": false, "readOnly": true } })).await;
+    let id = conn["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&app, "connect", json!({ "id": id })).await["readOnly"], true);
+
+    // reads and browsing work
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM customers", None).await), "2501");
+    let page = call(&app, "table_rows", json!({ "id": id, "queryId": "p", "query": { "schema": "public", "table": "customers", "limit": 5, "offset": 0 } })).await;
+    assert_eq!(page["result"]["rows"].as_array().unwrap().len(), 5);
+
+    // the server refuses writes and DDL, in query tabs too
+    for sql in ["UPDATE customers SET name = 'x' WHERE id = 1", "CREATE TABLE nope (a int)", "DELETE FROM customers"] {
+        let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": sql, "editor": "tab" })).await;
+        assert_eq!(err["code"], "25006", "{sql}: {err}");
+    }
+    // and the app refuses switching it back on
+    for sql in ["SET default_transaction_read_only = off", "BEGIN READ WRITE", "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE"] {
+        let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": sql, "editor": "tab" })).await;
+        assert_eq!(err["code"], "read_only", "{sql}: {err}");
+    }
+    assert_eq!(cell(&run(&app, &id, "SELECT name FROM customers WHERE id = 1", None).await), "Customer 1");
+}

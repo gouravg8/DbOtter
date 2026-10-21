@@ -1,4 +1,4 @@
-import { Check, CircleAlert, KeyRound } from "lucide-react";
+import { Check, CircleAlert, KeyRound, Lock, ShieldAlert } from "lucide-react";
 import { useState } from "react";
 import { api, DEFAULT_PORT, KIND_LABEL, toAppError, type ConnectionConfig, type ConnectionInput, type DbKind, type SslMode } from "../lib/api";
 import { parseConnectionUrl } from "../lib/format";
@@ -41,6 +41,8 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
     savePassword: conn?.savePassword ?? true,
     color: conn?.color ?? null,
     sslRootCert: conn?.sslRootCert ?? "",
+    readOnly: conn?.readOnly ?? false,
+    production: conn?.production ?? false,
   });
   const [url, setUrl] = useState("");
   // the name follows the URL until the user types their own
@@ -74,6 +76,8 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
     savePassword: !sqlite && form.savePassword,
     color: form.color,
     sslRootCert: !sqlite && form.sslMode === "verify-full" ? form.sslRootCert.trim() || null : null,
+    readOnly: form.readOnly,
+    production: form.production,
     // empty keeps the saved password when editing
     password: (!sqlite && form.password) || undefined,
   });
@@ -329,6 +333,22 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
             />
           </label>
         )}
+        <div className="safety">
+          <label className="check">
+            <input type="checkbox" checked={form.readOnly} onChange={(e) => set({ readOnly: e.target.checked })} />
+            <Lock size={13} /> Read-only <span className="muted small">(the database refuses every write)</span>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.production}
+              // production stands out in red unless another color was picked
+              onChange={(e) => set({ production: e.target.checked, color: e.target.checked && !form.color ? "#ef4444" : form.color })}
+            />
+            <ShieldAlert size={13} /> Production{" "}
+            <span className="muted small">(ask before UPDATE / DELETE without WHERE, DROP, TRUNCATE)</span>
+          </label>
+        </div>
         {/* lets Enter submit */}
         <button type="submit" hidden />
       </form>

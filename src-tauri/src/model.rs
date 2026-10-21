@@ -61,6 +61,12 @@ pub struct ConnectionConfig {
     /// PEM file of CA certificates for verify-full (instead of the system roots).
     #[serde(default)]
     pub ssl_root_cert: Option<String>,
+    /// The database refuses writes on every connection of this one.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Ask before risky statements (UPDATE / DELETE without WHERE, DROP, TRUNCATE).
+    #[serde(default)]
+    pub production: bool,
     #[serde(default)]
     pub created_at: u64,
 }
@@ -86,6 +92,10 @@ pub struct ConnectionInput {
     pub color: Option<String>,
     #[serde(default)]
     pub ssl_root_cert: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub production: bool,
     pub password: Option<String>,
 }
 
@@ -109,6 +119,7 @@ pub struct SessionInfo {
     pub user: String,
     /// Where unqualified names resolve: public, the MySQL database, or main.
     pub default_schema: String,
+    pub read_only: bool,
 }
 
 /* ---------- schema ---------- */

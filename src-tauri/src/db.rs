@@ -43,6 +43,16 @@ impl Session {
     }
 }
 
+/// Whether `sql` tries to switch a read-only session back to writing (`SET TRANSACTION READ
+/// WRITE`, `BEGIN READ WRITE`, `SET default_transaction_read_only = off`, `SET @@transaction_read_only = 0`…).
+/// Looks at the words only; a string mentioning those words is refused too, which is fine here.
+pub fn reenables_writes(sql: &str) -> bool {
+    let words = sql.to_lowercase().split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_string).collect::<Vec<_>>();
+    let has = |w: &str| words.iter().any(|x| x == w);
+    words.windows(2).any(|p| p[0] == "read" && p[1] == "write")
+        || (has("set") && ["default_transaction_read_only", "transaction_read_only", "tx_read_only"].iter().any(|v| has(v)))
+}
+
 /// "Column does not exist", per engine (Postgres SQLSTATE, MySQL error number, SQLite text).
 fn is_unknown_column(e: &AppError) -> bool {
     matches!(e.code.as_deref(), Some("42703") | Some("1054")) || e.message.contains("no such column")
@@ -119,6 +129,10 @@ impl Db {
         single_statement: bool,
     ) -> AppResult<QueryOutput> {
         let session = self.session(conn_id).await?;
+        if session.info().read_only && reenables_writes(sql) {
+            return Err(AppError::new("This connection is read-only: statements that turn writing back on are refused")
+                .with_code("read_only"));
+        }
         // registered before waiting for a connection, so a cancel in the meantime counts
         self.running.begin(query_id).await;
         let r = &self.running;
@@ -181,5 +195,27 @@ impl Db {
             .and_then(|row| row.first().cloned().flatten())
             .and_then(|v| v.parse().ok())
             .ok_or_else(|| AppError::new("Count returned no rows"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reenables_writes;
+
+    #[test]
+    fn spots_attempts_to_turn_writing_back_on() {
+        for sql in [
+            "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE",
+            "begin read  write",
+            "START TRANSACTION READ WRITE",
+            "set default_transaction_read_only = off",
+            "SET SESSION transaction_read_only = 0",
+            "set @@tx_read_only=0",
+        ] {
+            assert!(reenables_writes(sql), "{sql}");
+        }
+        for sql in ["SELECT * FROM t", "BEGIN", "SHOW transaction_read_only", "select readwrite from t", "BEGIN READ ONLY"] {
+            assert!(!reenables_writes(sql), "{sql}");
+        }
     }
 }

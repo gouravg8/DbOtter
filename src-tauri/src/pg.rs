@@ -123,6 +123,10 @@ fn pg_config(c: &ConnectionConfig, password: Option<&str>) -> tokio_postgres::Co
     if let Some(p) = password {
         cfg.password(p);
     }
+    if c.read_only {
+        // every transaction starts read-only; the server refuses writes and DDL
+        cfg.options("-c default_transaction_read_only=on");
+    }
     cfg
 }
 
@@ -272,6 +276,7 @@ impl PgSession {
             database: row.get(1),
             user: row.get(2),
             default_schema: "public".into(),
+            read_only: c.read_only,
         };
         Ok(PgSession {
             pool,

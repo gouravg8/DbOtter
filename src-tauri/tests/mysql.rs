@@ -367,3 +367,28 @@ async fn query_tabs_keep_their_own_session() {
     call(&app, "editor_release", json!({ "editor": "tab-a" })).await;
     assert_ne!(conn_id(run_in(&app, &id, "tab-a", "SELECT CONNECTION_ID()").await), a);
 }
+
+#[tokio::test]
+async fn read_only_connections() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let root = connected(&app, port, "").await;
+    shop(&app, &root, "otter_ro").await;
+    let mut ro = input(port, "root", "otter_ro", "prefer");
+    ro["input"]["readOnly"] = json!(true);
+    let id = call(&app, "connection_save", ro).await["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&app, "connect", json!({ "id": id })).await["readOnly"], true);
+
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM customers", None).await), "3");
+    // pooled connections too: they are reset between uses, and stay read-only
+    for _ in 0..6 {
+        let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": "DELETE FROM customers" })).await;
+        assert_eq!(err["code"], "1792", "{err}");
+    }
+    let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": "CREATE TABLE nope (a int)", "editor": "tab" })).await;
+    assert_eq!(err["code"], "1792", "{err}");
+    for sql in ["SET SESSION TRANSACTION READ WRITE", "START TRANSACTION READ WRITE", "SET SESSION transaction_read_only = 0"] {
+        let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": sql, "editor": "tab" })).await;
+        assert_eq!(err["code"], "read_only", "{sql}: {err}");
+    }
+}

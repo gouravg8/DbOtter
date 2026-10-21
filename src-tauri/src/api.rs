@@ -209,6 +209,8 @@ impl App {
             save_password: input.save_password,
             color: input.color.filter(|c| !c.is_empty()),
             ssl_root_cert: input.ssl_root_cert.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
+            read_only: input.read_only,
+            production: input.production,
             created_at: existing.as_ref().map(|c| c.created_at).unwrap_or_else(now_ms),
         };
 
@@ -273,6 +275,8 @@ impl App {
             save_password: input.save_password,
             color: None,
             ssl_root_cert: input.ssl_root_cert,
+            read_only: input.read_only,
+            production: input.production,
             created_at: 0,
         };
         self.db.test(&conn, password.as_deref()).await

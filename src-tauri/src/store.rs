@@ -152,6 +152,8 @@ mod tests {
             save_password: false,
             color: None,
             ssl_root_cert: None,
+            read_only: false,
+            production: false,
             created_at: 0,
         }
     }

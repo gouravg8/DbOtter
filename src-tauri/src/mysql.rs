@@ -107,6 +107,8 @@ fn my_opts(c: &ConnectionConfig, password: Option<&str>, ssl: Option<SslOpts>) -
         .prefer_socket(false)
         .ssl_opts(ssl)
         .connect_attribute("program_name", "DbOtter")
+        // setup commands also run again after the pool resets a connection
+        .setup(if c.read_only { vec!["SET SESSION TRANSACTION READ ONLY"] } else { vec![] })
         .pool_opts(PoolOpts::default().with_constraints(PoolConstraints::new(0, POOL_SIZE).unwrap_or_default()))
         .into()
 }
@@ -434,6 +436,7 @@ impl MySession {
             default_schema: database.clone(),
             database,
             user,
+            read_only: c.read_only,
         };
         Ok(MySession {
             pool: Pool::new(opts.clone()),

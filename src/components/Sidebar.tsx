@@ -3,6 +3,7 @@
  * h/← collapse or go to parent, Enter opens, s opens structure, / searches.
  */
 import {
+  Lock,
   ChevronDown,
   ChevronRight,
   Columns3,
@@ -304,6 +305,8 @@ export function Sidebar() {
                 </span>
                 <span className="dot" style={{ background: row.conn.color ?? "var(--subtle)" }} />
                 <span className="tree-label strong">{row.conn.name}</span>
+                {row.conn.readOnly && <Lock size={11} className="tree-icon" aria-label="Read-only" />}
+                {row.conn.production && <span className="prod-badge">prod</span>}
                 <span className="tree-status">
                   {s?.status === "connecting" || s?.schemaLoading ? (
                     <Spinner size={11} />

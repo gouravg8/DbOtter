@@ -530,6 +530,21 @@ test("connections connect on double-click; a single click does nothing", async (
   await expect(page.locator(".tree-row", { hasText: "customers" })).toBeVisible();
 });
 
+test("read-only connections refuse writes and say so", async ({ page }) => {
+  await open(page);
+  await page.locator(".tree-row", { hasText: "Shop" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Edit connection" }).click();
+  await page.locator(".check", { hasText: "Read-only" }).locator("input").check();
+  await page.getByRole("button", { name: "Save & connect" }).click();
+  await expect(page.locator(".tree-row", { hasText: "Shop" }).getByLabel("Read-only")).toBeVisible();
+  await expect(page.locator(".statusbar .ro-badge")).toHaveText(/read-only/);
+  await page.keyboard.press("Control+t");
+  await pane(page).locator(".cm-content").click();
+  await page.keyboard.type("update customers set name = 'x' where id = 1");
+  await page.keyboard.press("Control+Enter");
+  await expect(pane(page).locator(".error-panel")).toContainText("read-only transaction");
+});
+
 test("connections: edit and delete with confirmation", async ({ page }) => {
   await open(page);
   const row = page.locator(".tree-row", { hasText: "Shop" });

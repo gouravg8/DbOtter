@@ -112,9 +112,11 @@ fn file_path(database: &str) -> AppResult<PathBuf> {
 }
 
 /// Opens an existing file; never creates one (a typo in the path must not leave an empty
-/// database behind). foreign_keys stays at the library default.
-fn open(path: &Path) -> AppResult<Connection> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+/// database behind). foreign_keys stays at the library default. `read_only` opens the file
+/// read-only, so SQLite itself refuses every write (attached files included).
+fn open(path: &Path, read_only: bool) -> AppResult<Connection> {
+    let mode = if read_only { OpenFlags::SQLITE_OPEN_READ_ONLY } else { OpenFlags::SQLITE_OPEN_READ_WRITE };
+    let flags = mode | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let db = Connection::open_with_flags(path, flags).map_err(|e| {
         let e = AppError::from(e);
         AppError { message: format!("Can't open {}: {}", path.display(), e.message), ..e }
@@ -145,9 +147,9 @@ impl Conn {
     /// name is quoted by us: `ORDER BY "id"` after the column was renamed must fail (and be
     /// retried with the new key), not silently sort by the constant 'id'. Query tabs keep the
     /// file's usual behavior for the user's own SQL.
-    async fn open(path: PathBuf, strict_quotes: bool) -> AppResult<Conn> {
+    async fn open(path: PathBuf, read_only: bool, strict_quotes: bool) -> AppResult<Conn> {
         let db = blocking(move || {
-            let db = open(&path)?;
+            let db = open(&path, read_only)?;
             if strict_quotes {
                 db.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DQS_DML, false)?;
             }
@@ -580,7 +582,7 @@ impl LiteSession {
             return Ok(conn.clone());
         }
         let generation = self.generation(tab);
-        let conn = Conn::open(self.path.clone(), false).await?;
+        let conn = Conn::open(self.path.clone(), self.info.read_only, false).await?;
         if self.generation(tab) != generation {
             // the tab was closed while this was being opened: don't keep it
             return Err(canceled());
@@ -595,13 +597,14 @@ impl LiteSession {
     pub async fn test(c: &ConnectionConfig) -> AppResult<TestResult> {
         let started = Instant::now();
         let path = file_path(&c.database)?;
-        let server_version = blocking(move || sqlite_version(&open(&path)?)).await?;
+        let read_only = c.read_only;
+        let server_version = blocking(move || sqlite_version(&open(&path, read_only)?)).await?;
         Ok(TestResult { product: "SQLite".into(), server_version, latency_ms: started.elapsed().as_millis() as u64 })
     }
 
     pub async fn connect(c: &ConnectionConfig) -> AppResult<LiteSession> {
         let path = file_path(&c.database)?;
-        let shared = Conn::open(path.clone(), true).await?;
+        let shared = Conn::open(path.clone(), c.read_only, true).await?;
         let db = shared.db.clone().lock_owned().await;
         let server_version = blocking(move || sqlite_version(&db)).await?;
         let info = SessionInfo {
@@ -611,6 +614,7 @@ impl LiteSession {
             database: path.display().to_string(),
             user: String::new(),
             default_schema: "main".into(),
+            read_only: c.read_only,
         };
         Ok(LiteSession {
             path,

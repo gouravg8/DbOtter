@@ -492,3 +492,19 @@ async fn stable_paging_by_primary_key() {
     assert!(p["sql"].as_str().unwrap().contains("ORDER BY \"uid\""), "{}", p["sql"]);
     assert_eq!(p["result"]["rows"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn read_only_connections() {
+    let app = app();
+    let path = seeded();
+    let conn = call(&app, "connection_save", json!({ "input": { "kind": "sqlite", "name": "", "host": "", "port": 0,
+        "database": path.display().to_string(), "user": "", "sslMode": "disable", "savePassword": false, "readOnly": true } })).await;
+    let id = conn["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&app, "connect", json!({ "id": id })).await["readOnly"], true);
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM customers", None).await), "4");
+    for (sql, editor) in [("DELETE FROM customers", None), ("CREATE TABLE nope (a)", Some("tab"))] {
+        let err = call_err(&app, "run_query", json!({ "id": id, "queryId": "w", "sql": sql, "editor": editor })).await;
+        assert_eq!(err["code"], "SQLITE_READONLY", "{sql}: {err}");
+    }
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM customers", None).await), "4");
+}

@@ -433,6 +433,36 @@ body.col-resize * {
   width: 13px;
   color: var(--subtle);
 }
+.prod-badge,
+.ro-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 4px;
+}
+.prod-badge {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.ro-badge {
+  color: var(--muted);
+  background: var(--hover);
+}
+.safety {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 .chev.clickable {
   margin: -4px;
   padding: 4px;

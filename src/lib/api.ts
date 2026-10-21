@@ -25,6 +25,10 @@ export interface ConnectionConfig {
   color: string | null;
   /** PEM file of CA certificates for verify-full. */
   sslRootCert: string | null;
+  /** The database refuses writes on this connection. */
+  readOnly: boolean;
+  /** Ask before risky statements (UPDATE / DELETE without WHERE, DROP, TRUNCATE). */
+  production: boolean;
   createdAt: number;
 }
 
@@ -40,6 +44,8 @@ export interface ConnectionInput {
   savePassword: boolean;
   color?: string | null;
   sslRootCert?: string | null;
+  readOnly?: boolean;
+  production?: boolean;
   /** Omit to keep the saved password. */
   password?: string;
 }
@@ -62,6 +68,7 @@ export interface SessionInfo {
   user: string;
   /** Where unqualified names resolve: public, the MySQL database, or main. */
   defaultSchema: string;
+  readOnly: boolean;
 }
 
 export type RelationKind = "table" | "view" | "materializedView" | "foreignTable";
