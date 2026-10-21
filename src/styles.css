@@ -282,6 +282,12 @@ textarea {
   outline: none;
   transition: border-color 0.12s, box-shadow 0.12s;
 }
+/* the text as tall as the box: WebKitGTK clips what falls below the line box, and at
+   fractional display scales (125%) that cut off underscores. :where() keeps it below the
+   rules that size an input their own way */
+input:where(:not([type="checkbox"]):not([type="radio"])) {
+  line-height: 28px;
+}
 input:not([type="checkbox"]):focus,
 select:focus,
 textarea:focus {
@@ -377,6 +383,7 @@ body.col-resize * {
   flex: 1;
   min-width: 0;
   height: 26px !important;
+  line-height: 26px;
   padding: 0 !important;
   border: none !important;
   box-shadow: none !important;
@@ -647,6 +654,7 @@ body.col-resize * {
 .tab-rename {
   width: 120px;
   height: 22px !important;
+  line-height: 20px;
   font-size: 12.5px;
 }
 .tab-error {
@@ -869,6 +877,7 @@ body.col-resize * {
   border: none !important;
   box-shadow: none !important;
   height: 26px !important;
+  line-height: 26px;
   padding-left: 0 !important;
   background: transparent !important;
 }
@@ -1239,6 +1248,7 @@ body.col-resize * {
   flex: 1;
   max-width: 420px;
   height: 28px !important;
+  line-height: 26px;
 }
 .where-label {
   width: 72px;
@@ -1443,6 +1453,14 @@ body.col-resize * {
   box-shadow: var(--shadow);
   outline: none;
   animation: pop 0.14s ease-out;
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* dialog text can be selected and copied (messages, errors); controls can't */
+.modal button,
+.modal .segmented {
+  user-select: none;
+  -webkit-user-select: none;
 }
 .modal-head {
   display: flex;
@@ -1676,6 +1694,7 @@ body.col-resize * {
 .palette-input input {
   flex: 1;
   height: 46px !important;
+  line-height: 46px;
   padding: 0 !important;
   font-size: 14px;
   border: none !important;

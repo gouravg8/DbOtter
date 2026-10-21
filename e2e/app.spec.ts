@@ -699,3 +699,24 @@ test("connections: edit and delete with confirmation", async ({ page }) => {
   await expect(page.locator(".tree-empty")).toContainText("No connections yet");
   expect(await api("connections_list")).toEqual([]);
 });
+
+test("dialogs: text can be selected; input text gets the whole box", async ({ page }) => {
+  await open(page);
+  await page.getByTitle("New connection").click();
+  const user = page.locator(".field", { hasText: "User" }).locator("input");
+  await user.fill("smoothops_prod");
+  await page.getByRole("button", { name: "Test" }).click();
+  await expect(page.locator(".test-result")).toBeVisible();
+  // a message in the dialog can be selected (to copy an error)
+  await page.locator(".test-result").click({ clickCount: 3 });
+  expect((await page.evaluate(() => getSelection()?.toString() ?? "")).trim()).not.toBe("");
+  // so can the text of a field
+  await user.click({ clickCount: 3 });
+  expect(await user.evaluate((i: HTMLInputElement) => i.value.slice(i.selectionStart!, i.selectionEnd!))).toBe("smoothops_prod");
+  // the line box fills the field, so nothing under the baseline (an underscore) is clipped
+  const box = await user.evaluate((i) => {
+    const s = getComputedStyle(i);
+    return { line: parseFloat(s.lineHeight), inner: i.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom) };
+  });
+  expect(box.line).toBe(box.inner);
+});
