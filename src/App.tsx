@@ -156,7 +156,7 @@ function Welcome() {
         <ellipse cx="12" cy="14.2" rx="2.2" ry="1.5" fill="var(--accent-fg)" />
       </svg>
       <h1>DbOtter</h1>
-      <p className="muted">A fast, keyboard-first PostgreSQL client.</p>
+      <p className="muted">A fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite.</p>
       <div className="welcome-actions">
         {hasConnections ? (
           <button type="button" className="btn primary" onClick={() => openQueryTab()}>

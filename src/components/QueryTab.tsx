@@ -1,6 +1,7 @@
 import { Braces, CircleAlert, Copy, History, Play, Sheet, Square } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { codeLabel } from "../lib/dialect";
 import { formatCount, formatDuration, toCsv, toJson } from "../lib/format";
 import { MOD, modKey, useApp, type QueryTab as QueryTabState } from "../lib/store";
 import { ConnectionPicker } from "./ConnectionPicker";
@@ -24,6 +25,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
   const editor = useRef<SqlEditorHandle>(null);
   const settings = useApp((s) => s.settings);
   const session = useApp((s) => (tab.connId ? s.sessions[tab.connId] : undefined));
+  const conn = useApp((s) => s.connections.find((c) => c.id === tab.connId));
   const { updateTab, runQuery, cancelQuery, openHistory } = useApp.getState();
   const [now, setNow] = useState(Date.now());
   const [vimMode, setVimMode] = useState("");
@@ -152,7 +154,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
         <div className="spacer" />
         {session?.status === "connected" && session.info && (
           <span className="muted small toolbar-info">
-            {session.info.user}@{session.info.database}
+            {session.info.kind === "sqlite" ? session.info.database.split(/[\\/]/).pop() : `${session.info.user}@${session.info.database}`}
           </span>
         )}
         <button type="button" className="icon-btn" onClick={openHistory} title="Query history">
@@ -167,6 +169,9 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
           onChange={(sql) => updateTab(tab.id, { sql })}
           onRun={run}
           schema={session?.schema}
+          kind={session?.info?.kind ?? conn?.kind}
+          product={session?.info?.product}
+          defaultSchema={session?.info?.defaultSchema}
           vim={settings.vim}
           errorRange={range}
           onVimMode={setVimMode}
@@ -192,7 +197,11 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
               {tab.error.detail && <div className="error-extra">Detail: {tab.error.detail}</div>}
               {tab.error.hint && <div className="error-extra">Hint: {tab.error.hint}</div>}
               <div className="error-meta">
-                {tab.error.code && <span>SQLSTATE {tab.error.code}</span>}
+                {tab.error.code && (
+                  <span>
+                    {codeLabel(conn?.kind)} {tab.error.code}
+                  </span>
+                )}
                 {line && <span>Line {line}</span>}
               </div>
             </div>

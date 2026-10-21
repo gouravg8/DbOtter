@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { describeConnection } from "../lib/dialect";
 import { fuzzyScore } from "../lib/format";
 import { MOD, useApp } from "../lib/store";
 import { BUILT_IN_THEMES, SYSTEM_THEME_ID } from "../lib/themes";
@@ -70,7 +71,7 @@ export function CommandPalette({ mode }: { mode: "all" | "tables" }) {
         );
       for (const c of state.connections)
         if (state.sessions[c.id]?.status !== "connected")
-          out.push({ id: `connect:${c.id}`, label: `Connect to ${c.name}`, detail: `${c.user}@${c.host}/${c.database}`, group: "Connections", icon: <Plug size={14} />, run: () => void state.connect(c.id) });
+          out.push({ id: `connect:${c.id}`, label: `Connect to ${c.name}`, detail: describeConnection(c), group: "Connections", icon: <Plug size={14} />, run: () => void state.connect(c.id) });
       for (const t of [{ id: SYSTEM_THEME_ID, name: "System (light / dark)" }, ...BUILT_IN_THEMES, ...state.settings.customThemes])
         out.push({
           id: `theme:${t.id}`,

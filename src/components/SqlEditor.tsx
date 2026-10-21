@@ -4,7 +4,7 @@
  */
 import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, closeCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab, toggleComment } from "@codemirror/commands";
-import { PostgreSQL, sql, type SQLNamespace } from "@codemirror/lang-sql";
+import { MariaSQL, MySQL, PostgreSQL, SQLite, sql, type SQLDialect, type SQLNamespace } from "@codemirror/lang-sql";
 import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
@@ -21,7 +21,7 @@ import {
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import type { SchemaTree } from "../lib/api";
+import type { DbKind, SchemaTree } from "../lib/api";
 import { useApp } from "../lib/store";
 import { statementAt } from "../lib/sqlsplit";
 
@@ -38,6 +38,11 @@ interface Props {
   onChange: (v: string) => void;
   onRun: (sql: string, offset: number) => void;
   schema?: SchemaTree;
+  /** Highlighting and keywords follow the database (MariaDB has its own dialect). */
+  kind?: DbKind;
+  product?: string;
+  /** Unqualified table names complete from here. */
+  defaultSchema?: string;
   vim: boolean;
   /** Document range to mark as the error location. */
   errorRange?: { from: number; to: number } | null;
@@ -138,6 +143,14 @@ function namespace(tree?: SchemaTree): SQLNamespace {
   return ns;
 }
 
+function dialectFor(kind?: DbKind, product?: string): SQLDialect {
+  if (kind === "mysql") return product === "MariaDB" ? MariaSQL : MySQL;
+  return kind === "sqlite" ? SQLite : PostgreSQL;
+}
+
+const language = (p: Pick<Props, "kind" | "product" | "schema" | "defaultSchema">) =>
+  sql({ dialect: dialectFor(p.kind, p.product), schema: namespace(p.schema), defaultSchema: p.defaultSchema || "public" });
+
 function currentSql(view: EditorView) {
   const { from, to, head } = view.state.selection.main;
   const doc = view.state.doc.toString();
@@ -208,7 +221,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(p
             ...completionKeymap,
             indentWithTab,
           ]),
-          sqlComp.current.of(sql({ dialect: PostgreSQL, schema: namespace(props.schema), defaultSchema: "public" })),
+          sqlComp.current.of(language(props)),
           syntaxHighlighting(highlight),
           theme,
           errorField,
@@ -259,10 +272,9 @@ export const SqlEditor = forwardRef<SqlEditorHandle, Props>(function SqlEditor(p
   }, [props.vim]);
 
   useEffect(() => {
-    view.current!.dispatch({
-      effects: sqlComp.current.reconfigure(sql({ dialect: PostgreSQL, schema: namespace(props.schema), defaultSchema: "public" })),
-    });
-  }, [props.schema]);
+    view.current!.dispatch({ effects: sqlComp.current.reconfigure(language(props)) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.schema, props.kind, props.product, props.defaultSchema]);
 
   useEffect(() => {
     const v = view.current!;

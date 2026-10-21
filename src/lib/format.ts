@@ -1,4 +1,4 @@
-import type { Cell, SslMode } from "./api";
+import type { Cell, DbKind, SslMode } from "./api";
 
 /* ---------- copying rows ---------- */
 
@@ -46,6 +46,7 @@ export function timeAgo(t: number) {
 /* ---------- connection URLs ---------- */
 
 export interface ParsedUrl {
+  kind: DbKind;
   host?: string;
   port?: number;
   database?: string;
@@ -56,6 +57,11 @@ export interface ParsedUrl {
 
 const SSL_MODES: Record<string, SslMode> = {
   disable: "disable",
+  disabled: "disable",
+  preferred: "prefer",
+  required: "require",
+  verify_ca: "verify-full",
+  verify_identity: "verify-full",
   allow: "prefer",
   prefer: "prefer",
   require: "require",
@@ -63,12 +69,20 @@ const SSL_MODES: Record<string, SslMode> = {
   "verify-full": "verify-full",
 };
 
-/** postgres://user:pass@host:5432/db?sslmode=require (also postgresql://). Null if not a URL. */
-export function parsePostgresUrl(input: string): ParsedUrl | null {
-  const m = /^postgres(?:ql)?:\/\/(?:([^:@/]*)(?::([^@/]*))?@)?(\[[^\]]+\]|[^:/?#]*)(?::(\d+))?(?:\/([^?#]*))?(?:\?([^#]*))?$/i.exec(
-    input.trim(),
+/**
+ * A connection string: postgres:// (postgresql://), mysql:// (mariadb://), sqlite:/path or
+ * sqlite:///path, or just a path to a .db / .sqlite / .sqlite3 file. Null if it isn't one.
+ */
+export function parseConnectionUrl(input: string): ParsedUrl | null {
+  const text = input.trim();
+  const file = /^sqlite:(?:\/\/)?(.+)$/i.exec(text)?.[1] ?? (/^(~|\.{0,2})?\/.*\.(db|sqlite3?|db3)$/i.test(text) ? text : null);
+  if (file) return { kind: "sqlite", database: file };
+  const m = /^(postgres(?:ql)?|mysql|mariadb):\/\/(?:([^:@/]*)(?::([^@/]*))?@)?(\[[^\]]+\]|[^:/?#]*)(?::(\d+))?(?:\/([^?#]*))?(?:\?([^#]*))?$/i.exec(
+    text,
   );
   if (!m) return null;
+  const kind: DbKind = /^postgres/i.test(m[1]) ? "postgres" : "mysql";
+  m.splice(1, 1);
   // a raw % (e.g. in a password) isn't valid escaping: keep it as typed
   const dec = (s?: string) => {
     if (!s) return undefined;
@@ -79,6 +93,7 @@ export function parsePostgresUrl(input: string): ParsedUrl | null {
     }
   };
   const out: ParsedUrl = {
+    kind,
     user: dec(m[1]),
     password: dec(m[2]),
     host: dec(m[3])?.replace(/^\[|\]$/g, "") || undefined,
@@ -92,7 +107,7 @@ export function parsePostgresUrl(input: string): ParsedUrl | null {
     params = new URLSearchParams();
   }
   for (const [k, v] of params) {
-    if (k === "sslmode" && SSL_MODES[v]) out.sslMode = SSL_MODES[v];
+    if ((k === "sslmode" || k === "ssl-mode") && SSL_MODES[v.toLowerCase()]) out.sslMode = SSL_MODES[v.toLowerCase()];
     if (k === "user" && !out.user) out.user = v;
     if (k === "password" && !out.password) out.password = v;
     if (k === "host" && !out.host) out.host = v;

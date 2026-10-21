@@ -259,7 +259,9 @@ export const useApp = create<State>()(
           // first time: open the "public" schema (or the only one)
           const exp = get().expanded;
           if (!exp.some((k) => k.startsWith(`s:${id}:`))) {
-            const first = schema.schemas.find((x) => x.name === "public" && x.relations.length) ?? schema.schemas[0];
+            // the connection's own schema (public, the MySQL database, main) when it has tables
+            const home = get().sessions[id]?.info?.defaultSchema || "public";
+            const first = schema.schemas.find((x) => x.name === home && x.relations.length) ?? schema.schemas[0];
             if (first) get().toggleExpanded(`s:${id}:${first.name}`, true);
           }
         } catch (e) {

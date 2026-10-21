@@ -109,7 +109,9 @@ export function StatusBar() {
           {session?.status === "connected" && session.info && (
             <span className="muted">
               {" "}
-              · {session.info.user}@{session.info.database} · PostgreSQL {session.info.serverVersion.split(" ")[0]}
+              {" "}
+              · {session.info.kind === "sqlite" ? session.info.database : `${session.info.user}@${session.info.database}`} ·{" "}
+              {session.info.product} {session.info.serverVersion.split(/[\s-]/)[0]}
             </span>
           )}
           {session?.status === "connecting" && <span className="muted"> · connecting…</span>}

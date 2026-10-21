@@ -6,8 +6,15 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type SslMode = "disable" | "prefer" | "require" | "verify-full";
 
+/** Database engine. For "sqlite", `database` is the file path and host / port / user are unused. */
+export type DbKind = "postgres" | "mysql" | "sqlite";
+
+export const KIND_LABEL: Record<DbKind, string> = { postgres: "PostgreSQL", mysql: "MySQL / MariaDB", sqlite: "SQLite" };
+export const DEFAULT_PORT: Record<DbKind, number> = { postgres: 5432, mysql: 3306, sqlite: 0 };
+
 export interface ConnectionConfig {
   id: string;
+  kind: DbKind;
   name: string;
   host: string;
   port: number;
@@ -23,6 +30,7 @@ export interface ConnectionConfig {
 
 export interface ConnectionInput {
   id?: string;
+  kind: DbKind;
   name: string;
   host: string;
   port: number;
@@ -46,9 +54,14 @@ export interface AppError {
 }
 
 export interface SessionInfo {
+  kind: DbKind;
+  /** "PostgreSQL", "MySQL", "MariaDB" or "SQLite" */
+  product: string;
   serverVersion: string;
   database: string;
   user: string;
+  /** Where unqualified names resolve: public, the MySQL database, or main. */
+  defaultSchema: string;
 }
 
 export type RelationKind = "table" | "view" | "materializedView" | "foreignTable";
@@ -196,7 +209,7 @@ export const api = {
   saveConnection: (input: ConnectionInput) => call<ConnectionConfig>("connection_save", { input }),
   deleteConnection: (id: string) => call<void>("connection_delete", { id }),
   testConnection: (input: ConnectionInput) =>
-    call<{ serverVersion: string; latencyMs: number }>("connection_test", { input }),
+    call<{ product: string; serverVersion: string; latencyMs: number }>("connection_test", { input }),
   connect: (id: string, password?: string, remember = false) =>
     call<SessionInfo>("connect", { id, password, remember }),
   disconnect: (id: string) => call<void>("disconnect", { id }),

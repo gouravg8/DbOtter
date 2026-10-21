@@ -33,7 +33,8 @@ interface Props {
 const ROW_H = 26;
 const OVERSCAN = 6;
 const MAX_RENDER = 300;
-const NUMERIC = /^(smallint|integer|bigint|numeric|decimal|real|double precision|money|int[248]?|float[48])/;
+/** Number types of Postgres, MySQL (`int unsigned`, `decimal(10,2)`…) and SQLite: right-aligned. */
+const NUMERIC = /^(tinyint|smallint|mediumint|int|integer|bigint|numeric|decimal|real|double|float|money|int[248]|float[48])\b/i;
 
 type Pos = { r: number; c: number };
 

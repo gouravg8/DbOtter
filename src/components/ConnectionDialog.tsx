@@ -1,8 +1,9 @@
 import { Check, CircleAlert, KeyRound } from "lucide-react";
 import { useState } from "react";
-import { api, toAppError, type ConnectionConfig, type ConnectionInput, type SslMode } from "../lib/api";
-import { parsePostgresUrl } from "../lib/format";
+import { api, DEFAULT_PORT, KIND_LABEL, toAppError, type ConnectionConfig, type ConnectionInput, type DbKind, type SslMode } from "../lib/api";
+import { parseConnectionUrl } from "../lib/format";
 import { useApp } from "../lib/store";
+import { describeConnection } from "../lib/dialect";
 import { Modal, Spinner } from "./ui";
 
 const COLORS = [null, "#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444"];
@@ -12,15 +13,29 @@ const SSL: { value: SslMode; label: string }[] = [
   { value: "require", label: "Require (no certificate check)" },
   { value: "verify-full", label: "Verify full (check certificate and host)" },
 ];
+const KINDS: DbKind[] = ["postgres", "mysql", "sqlite"];
+/** Values the form starts with per engine; swapped on an engine change unless edited. */
+const DEFAULTS: Record<DbKind, { port: string; database: string; user: string }> = {
+  postgres: { port: "5432", database: "postgres", user: "postgres" },
+  mysql: { port: "3306", database: "", user: "root" },
+  sqlite: { port: "", database: "", user: "" },
+};
+const URL_HINT: Record<DbKind, string> = {
+  postgres: "postgres://user:password@host:5432/database",
+  mysql: "mysql://user:password@host:3306/database",
+  sqlite: "sqlite:///path/to/file.db  or just the file path",
+};
 
 export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
   const { setDialog, connectionSaved, toast } = useApp.getState();
+  const kind0: DbKind = conn?.kind ?? "postgres";
   const [form, setForm] = useState({
+    kind: kind0,
     name: conn?.name ?? "",
     host: conn?.host ?? "localhost",
-    port: String(conn?.port ?? 5432),
-    database: conn?.database ?? "postgres",
-    user: conn?.user ?? "postgres",
+    port: conn ? String(conn.port || "") : DEFAULTS[kind0].port,
+    database: conn?.database ?? DEFAULTS[kind0].database,
+    user: conn?.user ?? DEFAULTS[kind0].user,
     password: "",
     sslMode: conn?.sslMode ?? ("prefer" as SslMode),
     savePassword: conn?.savePassword ?? true,
@@ -37,39 +52,55 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
     setForm({ ...form, ...patch });
     setTest(null);
   };
+  const sqlite = form.kind === "sqlite";
+
+  /** Engine switch: fields still at the old engine's defaults take the new one's. */
+  const switchKind = (f: typeof form, kind: DbKind): typeof form => {
+    const from = DEFAULTS[f.kind];
+    const to = DEFAULTS[kind];
+    const keep = (field: "port" | "database" | "user") => (f[field] === from[field] ? to[field] : f[field]);
+    return { ...f, kind, port: keep("port"), database: kind === "sqlite" || f.kind === "sqlite" ? to.database : keep("database"), user: keep("user") };
+  };
 
   const input = (): ConnectionInput => ({
     id: conn?.id,
+    kind: form.kind,
     name: form.name,
-    host: form.host,
-    port: Number(form.port) || 5432,
+    host: sqlite ? "" : form.host,
+    port: sqlite ? 0 : Number(form.port) || DEFAULT_PORT[form.kind],
     database: form.database,
-    user: form.user,
+    user: sqlite ? "" : form.user,
     sslMode: form.sslMode,
-    savePassword: form.savePassword,
+    savePassword: !sqlite && form.savePassword,
     color: form.color,
-    sslRootCert: form.sslMode === "verify-full" ? form.sslRootCert.trim() || null : null,
+    sslRootCert: !sqlite && form.sslMode === "verify-full" ? form.sslRootCert.trim() || null : null,
     // empty keeps the saved password when editing
-    password: form.password || undefined,
+    password: (!sqlite && form.password) || undefined,
   });
+
+  const autoNameFor = (f: typeof form) =>
+    f.kind === "sqlite" ? (f.database.split(/[\\/]/).pop() ?? "") : `${f.database || f.user}@${f.host}`;
 
   const pasteUrl = (text: string) => {
     setUrl(text);
-    const p = parsePostgresUrl(text);
+    const p = parseConnectionUrl(text);
     if (!p) return;
-    const name = `${p.database ?? form.database}@${p.host ?? form.host}`;
     const followUrl = autoName !== null && form.name === autoName;
-    setForm((f) => ({
-      ...f,
-      host: p.host ?? f.host,
-      port: p.port ? String(p.port) : f.port,
-      database: p.database ?? f.database,
-      user: p.user ?? f.user,
-      password: p.password ?? f.password,
-      sslMode: p.sslMode ?? f.sslMode,
-      name: followUrl ? name : f.name,
-    }));
-    if (followUrl) setAutoName(name);
+    let next = p.kind !== form.kind ? switchKind(form, p.kind) : { ...form };
+    next = {
+      ...next,
+      host: p.host ?? next.host,
+      port: p.port ? String(p.port) : next.port,
+      database: p.database ?? next.database,
+      user: p.user ?? next.user,
+      password: p.password ?? next.password,
+      sslMode: p.sslMode ?? next.sslMode,
+    };
+    if (followUrl) {
+      next.name = autoNameFor(next);
+      setAutoName(next.name);
+    }
+    setForm(next);
     setTest(null);
   };
 
@@ -78,7 +109,7 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
     setTest(null);
     try {
       const r = await api.testConnection(input());
-      setTest({ ok: true, text: `Connected · PostgreSQL ${r.serverVersion} · ${r.latencyMs} ms` });
+      setTest({ ok: true, text: `Connected · ${r.product} ${r.serverVersion} · ${r.latencyMs} ms` });
     } catch (e) {
       setTest({ ok: false, text: toAppError(e).message });
     } finally {
@@ -101,8 +132,8 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
   };
 
   const port = Number(form.port);
-  const portOk = Number.isInteger(port) && port >= 1 && port <= 65535;
-  const valid = form.host.trim() && form.user.trim() && portOk;
+  const portOk = sqlite || (Number.isInteger(port) && port >= 1 && port <= 65535);
+  const valid = sqlite ? !!form.database.trim() : form.host.trim() && form.user.trim() && portOk;
   const keychainNote = conn?.savePassword
     ? form.savePassword
       ? "Saved in keychain (type to change)"
@@ -138,16 +169,39 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
           if (valid) void save(true);
         }}
       >
+        <div className="segmented kinds" role="radiogroup" aria-label="Database">
+          {KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={form.kind === k}
+              className={form.kind === k ? "active" : ""}
+              onClick={() => {
+                if (k === form.kind) return;
+                const next = switchKind(form, k);
+                if (autoName !== null && form.name === autoName) {
+                  next.name = autoNameFor(next);
+                  setAutoName(next.name);
+                }
+                setForm(next);
+                setTest(null);
+              }}
+            >
+              {KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
         <label className="field">
           <span>Paste a connection URL</span>
           <input
             className="mono"
             value={url}
-            placeholder="postgres://user:password@host:5432/database"
+            placeholder={URL_HINT[form.kind]}
             onChange={(e) => pasteUrl(e.target.value)}
             aria-label="Connection URL"
           />
-          {url && !parsePostgresUrl(url) && <small className="warn">Not a postgres:// URL</small>}
+          {url && !parseConnectionUrl(url) && <small className="warn">Not a postgres://, mysql:// or sqlite: URL</small>}
         </label>
         <div className="form-divider">
           <span>or fill in</span>
@@ -156,65 +210,96 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
           <span>Name</span>
           <input
             value={form.name}
-            placeholder={`${form.database}@${form.host}`}
+            placeholder={autoNameFor(form) || "My database"}
             onChange={(e) => {
               set({ name: e.target.value });
               setAutoName(null);
             }}
           />
         </label>
-        <div className="field-row">
-          <label className="field grow">
-            <span>Host</span>
-            <input value={form.host} onChange={(e) => set({ host: e.target.value })} required />
-          </label>
-          <label className="field port">
-            <span>Port</span>
+        {sqlite ? (
+          <label className="field">
+            <span>Database file</span>
             <input
-              value={form.port}
-              inputMode="numeric"
-              maxLength={5}
-              aria-invalid={!portOk}
-              onChange={(e) => set({ port: e.target.value.replace(/\D/g, "") })}
+              className="mono"
+              value={form.database}
+              placeholder="/path/to/app.db"
+              aria-label="Database file"
+              onChange={(e) => {
+                const next = { ...form, database: e.target.value };
+                if (autoName !== null && form.name === autoName) {
+                  next.name = autoNameFor(next);
+                  setAutoName(next.name);
+                }
+                setForm(next);
+                setTest(null);
+              }}
+              required
             />
-            {!portOk && <small className="warn">1–65535</small>}
+            <small className="muted">An existing SQLite file. A path starting with ~/ is in your home folder.</small>
           </label>
-        </div>
+        ) : (
+          <>
+            <div className="field-row">
+              <label className="field grow">
+                <span>Host</span>
+                <input value={form.host} onChange={(e) => set({ host: e.target.value })} required />
+              </label>
+              <label className="field port">
+                <span>Port</span>
+                <input
+                  value={form.port}
+                  inputMode="numeric"
+                  maxLength={5}
+                  aria-invalid={!portOk}
+                  onChange={(e) => set({ port: e.target.value.replace(/\D/g, "") })}
+                />
+                {!portOk && <small className="warn">1–65535</small>}
+              </label>
+            </div>
+            <div className="field-row">
+              <label className="field grow">
+                <span>Database</span>
+                <input
+                  value={form.database}
+                  placeholder={form.kind === "mysql" ? "optional: all databases" : ""}
+                  onChange={(e) => set({ database: e.target.value })}
+                />
+              </label>
+              <label className="field grow">
+                <span>User</span>
+                <input value={form.user} onChange={(e) => set({ user: e.target.value })} required />
+              </label>
+            </div>
+            <label className="field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={form.password}
+                autoComplete="off"
+                placeholder={keychainNote}
+                onChange={(e) => set({ password: e.target.value })}
+              />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={form.savePassword} onChange={(e) => set({ savePassword: e.target.checked })} />
+              <KeyRound size={13} /> Save password in the system keychain
+            </label>
+          </>
+        )}
         <div className="field-row">
-          <label className="field grow">
-            <span>Database</span>
-            <input value={form.database} onChange={(e) => set({ database: e.target.value })} />
-          </label>
-          <label className="field grow">
-            <span>User</span>
-            <input value={form.user} onChange={(e) => set({ user: e.target.value })} required />
-          </label>
-        </div>
-        <label className="field">
-          <span>Password</span>
-          <input
-            type="password"
-            value={form.password}
-            autoComplete="off"
-            placeholder={keychainNote}
-            onChange={(e) => set({ password: e.target.value })}
-          />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={form.savePassword} onChange={(e) => set({ savePassword: e.target.checked })} />
-          <KeyRound size={13} /> Save password in the system keychain
-        </label>
-        <div className="field-row">
-          <label className="field grow">
-            <span>SSL</span>
-            <select value={form.sslMode} onChange={(e) => set({ sslMode: e.target.value as SslMode })}>
-              {SSL.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!sqlite && (
+            <label className="field grow">
+              <span>SSL</span>
+              <select value={form.sslMode} onChange={(e) => set({ sslMode: e.target.value as SslMode })}>
+                {SSL.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="field">
             <span>Color</span>
             <div className="swatches" role="radiogroup" aria-label="Color">
@@ -233,7 +318,7 @@ export function ConnectionDialog({ conn }: { conn?: ConnectionConfig }) {
             </div>
           </div>
         </div>
-        {form.sslMode === "verify-full" && (
+        {!sqlite && form.sslMode === "verify-full" && (
           <label className="field">
             <span>CA certificate file (optional)</span>
             <input
@@ -292,7 +377,7 @@ export function PasswordPrompt({ connId, error }: { connId: string; error?: stri
         }}
       >
         <p className="muted small">
-          {conn?.user}@{conn?.host}:{conn?.port}/{conn?.database}
+          {conn && describeConnection(conn)}
         </p>
         <label className="field">
           <span>Password</span>

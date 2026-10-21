@@ -736,6 +736,16 @@ body.col-resize * {
   background: var(--surface);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
 }
+.segmented.kinds {
+  display: flex;
+}
+.segmented.kinds button {
+  flex: 1;
+  justify-content: center;
+  height: 26px;
+  font-size: 12.5px;
+}
+
 .search-box {
   display: flex;
   align-items: center;

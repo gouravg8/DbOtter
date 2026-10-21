@@ -24,9 +24,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionConfig, RelationKind, RelationNode } from "../lib/api";
+import { qualified } from "../lib/dialect";
 import { fuzzyScore } from "../lib/format";
 import { MOD, useApp } from "../lib/store";
-import { quoteIdent } from "./TableTab";
 import { Spinner, copyText, useMenu, type MenuItem } from "./ui";
 
 type Row =
@@ -158,7 +158,8 @@ export function Sidebar() {
   };
 
   const relMenu = (row: Extract<Row, { kind: "rel" }>): (MenuItem | "divider")[] => {
-    const name = `${quoteIdent(row.schema)}.${quoteIdent(row.rel.name)}`;
+    const kind = connections.find((c) => c.id === row.connId)?.kind ?? "postgres";
+    const name = qualified(kind, row.schema, row.rel.name);
     return [
       { label: "Open data", icon: <Table size={14} />, hint: "Enter", onSelect: () => activate(row, "data") },
       { label: "Structure", icon: <Columns3 size={14} />, hint: "s", onSelect: () => activate(row, "structure") },
@@ -294,7 +295,7 @@ export function Sidebar() {
                   {s?.status === "connecting" || s?.schemaLoading ? (
                     <Spinner size={11} />
                   ) : s?.status === "connected" ? (
-                    <span className="live" title={`Connected · Postgres ${s.info?.serverVersion}`} />
+                    <span className="live" title={`Connected · ${s.info?.product} ${s.info?.serverVersion}`} />
                   ) : s?.status === "error" ? (
                     <span className="err" title={s.error?.message}>!</span>
                   ) : null}

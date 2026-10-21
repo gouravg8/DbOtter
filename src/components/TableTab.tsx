@@ -24,6 +24,7 @@ import {
   type TableRows,
   type TableStructure,
 } from "../lib/api";
+import { qualified } from "../lib/dialect";
 import { formatCount, formatDuration } from "../lib/format";
 import { MOD, modKey, useApp, type TableTab as TableTabState } from "../lib/store";
 import { DataGrid } from "./DataGrid";
@@ -35,7 +36,6 @@ const NO_VALUE = new Set<FilterOp>(["is null", "is not null"]);
 /** Types without an = operator: comparisons on them go through ::text. */
 const NO_EQUALITY = /^(json|xml|point|line|lseg|box|path|polygon|circle)\b/;
 
-export const quoteIdent = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
 export function TableTab({ tab, active }: { tab: TableTabState; active: boolean }) {
   const settings = useApp((s) => s.settings);
@@ -242,7 +242,13 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
           type="button"
           className="icon-btn"
           title="Open this query in a new tab"
-          onClick={() => openQueryTab(tab.connId, data?.sql.replace(/ LIMIT \d+( OFFSET \d+)?$/, ` LIMIT ${pageSize}`) ?? `SELECT * FROM ${quoteIdent(tab.schema)}.${quoteIdent(tab.table)} LIMIT 100`)}
+          onClick={() =>
+            openQueryTab(
+              tab.connId,
+              data?.sql.replace(/ LIMIT \d+( OFFSET \d+)?$/, ` LIMIT ${pageSize}`) ??
+                `SELECT * FROM ${qualified(session?.info?.kind ?? "postgres", tab.schema, tab.table)} LIMIT 100`,
+            )
+          }
         >
           <SquareTerminal size={15} />
         </button>
