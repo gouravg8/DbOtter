@@ -1,5 +1,7 @@
 # DbOtter
 
+![DbOtter: browsing a MySQL table, with the schema tree on the left](docs/hero.png)
+
 A fast, keyboard-first database client for **PostgreSQL**, **MySQL / MariaDB** and
 **SQLite**. **v0.0.2**
 
