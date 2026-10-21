@@ -12,7 +12,7 @@ import {
   Table,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   newId,
@@ -26,9 +26,11 @@ import {
   type TableStructure,
 } from "../lib/api";
 import { qualified } from "../lib/dialect";
+import { editability } from "../lib/edits";
 import { formatCount, formatDuration } from "../lib/format";
 import { MOD, modKey, useApp, type TableTab as TableTabState } from "../lib/store";
 import { DataGrid } from "./DataGrid";
+import { useEdits } from "./Edits";
 import { StructureView } from "./StructureView";
 import { Spinner } from "./ui";
 
@@ -109,6 +111,26 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
     return () => window.removeEventListener("dbotter:export", openExport);
   }, [active, openExport]);
 
+  const rows = data?.result.rows ?? [];
+  const editInfo = useMemo(() => {
+    if (!data || !structure) return null;
+    if (tab.relKind !== "table") return { ok: false as const, reason: "views can't be edited here" };
+    if (session?.info?.readOnly) return { ok: false as const, reason: "the connection is read-only" };
+    return editability(data.result.columns, structure.columns);
+  }, [data, structure, tab.relKind, session?.info?.readOnly]);
+  const edits = useEdits({
+    tabId: tab.id,
+    connId: tab.connId,
+    target: { schema: tab.schema, table: tab.table },
+    columns: data?.result.columns ?? [],
+    rows,
+    info: editInfo,
+    resetKey: data,
+    // reloaded, so values the database changed itself (triggers, defaults) show too
+    onSaved: () => setReload((n) => n + 1),
+  });
+  const guard = edits.guard;
+
   useEffect(() => {
     if (!shown || !connected || tab.view !== "data") return;
     let stale = false;
@@ -140,10 +162,11 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
 
   useEffect(() => {
     if (!active) return;
-    const refresh = () => {
-      setStructure(null);
-      setReload((n) => n + 1);
-    };
+    const refresh = () =>
+      guard(() => {
+        setStructure(null);
+        setReload((n) => n + 1);
+      });
     const focus = () => document.querySelector<HTMLElement>(`[data-tab="${tab.id}"] .grid`)?.focus();
     window.addEventListener("dbotter:refresh", refresh);
     window.addEventListener("dbotter:focus-main", focus);
@@ -151,9 +174,11 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
       window.removeEventListener("dbotter:refresh", refresh);
       window.removeEventListener("dbotter:focus-main", focus);
     };
-  }, [active, tab.id]);
+  }, [active, tab.id, guard]);
 
-  const apply = (filters = draft, where = whereDraft) => {
+
+  const apply = (filters = draft, where = whereDraft) => guard(() => applyNow(filters, where));
+  const applyNow = (filters: Filter[], where: string) => {
     const clean = filters
       .filter((f) => f.column && (NO_VALUE.has(f.op) || f.value !== ""))
       .map((f) => ({ ...f, asText: f.asText || asText(f.column) }));
@@ -177,10 +202,11 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
     apply(next);
   };
 
-  const onSort = (column: string) => {
-    setOffset(0);
-    setSort((s) => (s?.column !== column ? { column, desc: false } : s.desc ? null : { column, desc: true }));
-  };
+  const onSort = (column: string) =>
+    guard(() => {
+      setOffset(0);
+      setSort((s) => (s?.column !== column ? { column, desc: false } : s.desc ? null : { column, desc: true }));
+    });
 
   const runCount = async () => {
     const id = newId();
@@ -200,17 +226,17 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
     }
   };
 
-  const rows = data?.result.rows ?? [];
   const estimate = structure && structure.estimatedRows >= 0 && !applied.filters.length && !applied.where ? structure.estimatedRows : null;
   const total = count ?? null;
   const hasNext = total !== null ? offset + rows.length < total : rows.length === pageSize;
   const filtered = applied.filters.length > 0 || !!applied.where;
 
-  const page = (dir: -1 | 1 | 0) => {
-    if (dir === 0) setOffset(0);
-    else if (dir === 1 && hasNext) setOffset(offset + pageSize);
-    else if (dir === -1 && offset > 0) setOffset(Math.max(0, offset - pageSize));
-  };
+  const page = (dir: -1 | 1 | 0) =>
+    guard(() => {
+      if (dir === 0) setOffset(0);
+      else if (dir === 1 && hasNext) setOffset(offset + pageSize);
+      else if (dir === -1 && offset > 0) setOffset(Math.max(0, offset - pageSize));
+    });
 
   return (
     <div
@@ -269,7 +295,7 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
         >
           <SquareTerminal size={15} />
         </button>
-        <button type="button" className="icon-btn" title={`Refresh (${MOD} R)`} onClick={() => { setStructure(null); setReload((n) => n + 1); }}>
+        <button type="button" className="icon-btn" title={`Refresh (${MOD} R)`} onClick={() => guard(() => { setStructure(null); setReload((n) => n + 1); })}>
           <RefreshCw size={15} className={loading ? "spin" : ""} />
         </button>
       </div>
@@ -368,8 +394,13 @@ export function TableTab({ tab, active }: { tab: TableTabState; active: boolean 
               vim={settings.vim}
               resetKey={`${offset}:${JSON.stringify(sort)}:${JSON.stringify(applied)}:${reload}`}
               autoFocus={active}
+              editable={edits.editable}
+              readOnlyReason={edits.readOnlyReason}
+              pending={edits.pending}
+              onEdit={edits.onEdit}
             />
           </div>
+          {edits.bar}
           <div className="results-foot">
             <span>
               {rows.length ? (

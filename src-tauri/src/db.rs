@@ -188,6 +188,62 @@ impl Db {
         ran.sink.finish(ran.outcome, ran.duration_ms)
     }
 
+    /// Saves rows edited in the grid, all or nothing: one UPDATE per row by its key, in one
+    /// transaction on a session of its own (a query tab's open transaction isn't involved).
+    /// Each key must still match exactly one row, else nothing is saved. `dry_run` only
+    /// returns the statements, for review.
+    pub async fn apply_edits(
+        &self,
+        conn_id: &str,
+        query_id: &str,
+        schema: &str,
+        table: &str,
+        edits: &[RowEdit],
+        dry_run: bool,
+    ) -> AppResult<EditResult> {
+        let session = self.session(conn_id).await?;
+        let d = session.info().kind.dialect();
+        let statements = edits.iter().map(|e| crate::sql::update_row(d, schema, table, e)).collect::<AppResult<Vec<_>>>()?;
+        if dry_run || edits.is_empty() {
+            return Ok(EditResult { statements, saved: 0 });
+        }
+        if session.info().read_only {
+            return Err(AppError::new("This connection is read-only").with_code("read_only"));
+        }
+        // a count before each UPDATE: MySQL reports 0 affected rows for an UPDATE that
+        // changes nothing, so its count can't tell a missing row
+        let mut batch = String::from("BEGIN;\n");
+        for (e, update) in edits.iter().zip(&statements) {
+            batch.push_str(&format!("{};\n{update};\n", crate::sql::count_row(d, schema, table, e)?));
+        }
+        let tab = format!("edit:{}", uuid::Uuid::new_v4());
+        let tx = |sql: &'static str| {
+            let tab = tab.clone();
+            async move { self.run(conn_id, &uuid::Uuid::new_v4().to_string(), sql, 1, Some(&tab), false).await }
+        };
+        let saved = match self.run(conn_id, query_id, &batch, 10, Some(&tab), false).await {
+            Ok(out) => {
+                let counts: Vec<Option<String>> = out
+                    .results
+                    .iter()
+                    .filter(|r| r.has_rows)
+                    .map(|r| r.rows.first().and_then(|row| row.first().cloned().flatten()))
+                    .collect();
+                match edits.iter().zip(&counts).position(|(_, n)| n.as_deref() != Some("1")) {
+                    Some(i) => Err(stale_row(&edits[i], counts[i].as_deref())),
+                    None if counts.len() != edits.len() => Err(AppError::new("The database didn't confirm every change; nothing was saved")),
+                    None => tx("COMMIT").await.map(|_| edits.len()),
+                }
+            }
+            Err(e) => Err(e),
+        };
+        if saved.is_err() {
+            let _ = tx("ROLLBACK").await;
+        }
+        self.release_editor(&tab).await;
+        Ok(EditResult { statements, saved: saved? })
+    }
+
     /// Closes a query tab's own connection (the tab was closed or changed connection).
     pub async fn release_editor(&self, tab: &str) {
         let sessions: Vec<Arc<Session>> = self.sessions.read().await.values().cloned().collect();
@@ -251,6 +307,13 @@ impl Db {
             .and_then(|v| v.parse().ok())
             .ok_or_else(|| AppError::new("Count returned no rows"))
     }
+}
+
+/// A changed row whose key no longer finds exactly one row.
+fn stale_row(edit: &RowEdit, count: Option<&str>) -> AppError {
+    let key: Vec<String> = edit.key.iter().map(|(c, v)| format!("{c} = {}", v.as_deref().unwrap_or("NULL"))).collect();
+    let what = if count == Some("0") { "is no longer there (deleted, or its key changed)" } else { "isn't a single row any more" };
+    AppError::new(format!("The row with {} {what}. Nothing was saved; refresh and try again.", key.join(", "))).with_code("stale_row")
 }
 
 /// What to export.

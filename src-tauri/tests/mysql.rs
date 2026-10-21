@@ -459,3 +459,29 @@ async fn export_tables_and_queries() {
     run(&app, &id, "DROP DATABASE export_shop", None).await;
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn edits_save_all_or_nothing() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = connected(&app, port, "").await;
+    run(&app, &id, "DROP DATABASE IF EXISTS edit_db; CREATE DATABASE edit_db;
+        CREATE TABLE edit_db.t (id INT PRIMARY KEY, n INT, note TEXT); INSERT INTO edit_db.t VALUES (1, 1, 'a'), (2, 2, 'b')", None).await;
+    let edits = |edits: Value| {
+        let app = &app;
+        let id = id.clone();
+        async move {
+            app.dispatch("apply_edits", json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "schema": "edit_db",
+                "table": "t", "edits": edits })).await.map_err(|e| serde_json::to_value(e).unwrap())
+        }
+    };
+    // the same value again: MySQL says 0 rows affected, but the row is there, so it saves
+    let ok = edits(json!([{ "key": [["id", "1"]], "set": [["n", "1"]] }, { "key": [["id", "2"]], "set": [["note", null], ["n", "20"]] }])).await.unwrap();
+    assert_eq!(ok["saved"], 2);
+    let rows = run(&app, &id, "SELECT n, note FROM edit_db.t ORDER BY id", None).await;
+    assert_eq!(rows["results"][0]["rows"], json!([["1", "a"], ["20", null]]));
+    let err = edits(json!([{ "key": [["id", "1"]], "set": [["n", "5"]] }, { "key": [["id", "3"]], "set": [["n", "5"]] }])).await.unwrap_err();
+    assert_eq!(err["code"], "stale_row");
+    assert_eq!(cell(&run(&app, &id, "SELECT n FROM edit_db.t WHERE id = 1", None).await), json!("1"));
+    run(&app, &id, "DROP DATABASE edit_db", None).await;
+}

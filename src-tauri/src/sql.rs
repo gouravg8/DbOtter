@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
-use crate::model::{Filter, TableQuery};
+use crate::model::{Filter, RowEdit, TableQuery};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -118,6 +118,40 @@ pub fn table_select(d: Dialect, q: &TableQuery, default_order: &[String]) -> App
 
 pub fn table_count(d: Dialect, q: &TableQuery) -> AppResult<String> {
     Ok(format!("SELECT count(*) FROM {}{}", d.qualified(&q.schema, &q.table), where_clause(d, q)?))
+}
+
+/// `a = 'x' AND b IS NULL`: the row with these values.
+fn key_clause(d: Dialect, key: &[(String, Option<String>)]) -> AppResult<String> {
+    if key.is_empty() {
+        return Err(AppError::new("A changed row needs its primary key"));
+    }
+    Ok(key
+        .iter()
+        .map(|(c, v)| match v {
+            Some(v) => format!("{} = {}", d.quote_ident(c), d.quote_literal(v)),
+            None => format!("{} IS NULL", d.quote_ident(c)),
+        })
+        .collect::<Vec<_>>()
+        .join(" AND "))
+}
+
+/// One edited row: `UPDATE t SET a = 'x' WHERE id = '1'`. Values are quoted literals; the
+/// server converts them to the column types, as it does for typed-in SQL.
+pub fn update_row(d: Dialect, schema: &str, table: &str, edit: &RowEdit) -> AppResult<String> {
+    if edit.set.is_empty() {
+        return Err(AppError::new("A changed row needs a changed value"));
+    }
+    let set: Vec<String> = edit
+        .set
+        .iter()
+        .map(|(c, v)| format!("{} = {}", d.quote_ident(c), v.as_deref().map_or_else(|| "NULL".into(), |v| d.quote_literal(v))))
+        .collect();
+    Ok(format!("UPDATE {} SET {} WHERE {}", d.qualified(schema, table), set.join(", "), key_clause(d, &edit.key)?))
+}
+
+/// How many rows the edit's key matches (it must be exactly one).
+pub fn count_row(d: Dialect, schema: &str, table: &str, edit: &RowEdit) -> AppResult<String> {
+    Ok(format!("SELECT count(*) FROM {} WHERE {}", d.qualified(schema, table), key_clause(d, &edit.key)?))
 }
 
 #[derive(Debug, PartialEq)]
@@ -331,6 +365,24 @@ mod tests {
         let two = read_query(Postgres, "select 1; select 2").unwrap_err();
         assert!(two.message.contains("one statement"), "{}", two.message);
         assert_eq!(read_query(Postgres, "drop table t").unwrap_err().code.as_deref(), Some("not_read_only"));
+    }
+
+    #[test]
+    fn updates_one_row_by_its_key() {
+        let edit = RowEdit {
+            key: vec![("id".into(), Some("5".into())), ("org".into(), None)],
+            set: vec![("name".into(), Some("it's".into())), ("note".into(), None)],
+        };
+        assert_eq!(
+            update_row(Postgres, "public", "users", &edit).unwrap(),
+            "UPDATE \"public\".\"users\" SET \"name\" = E'it''s', \"note\" = NULL WHERE \"id\" = E'5' AND \"org\" IS NULL"
+        );
+        assert_eq!(
+            count_row(Mysql, "shop", "users", &edit).unwrap(),
+            "SELECT count(*) FROM `shop`.`users` WHERE `id` = '5' AND `org` IS NULL"
+        );
+        assert!(update_row(Sqlite, "main", "t", &RowEdit { key: vec![], set: edit.set.clone() }).is_err());
+        assert!(update_row(Sqlite, "main", "t", &RowEdit { key: edit.key.clone(), set: vec![] }).is_err());
     }
 
     #[test]

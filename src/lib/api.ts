@@ -199,6 +199,17 @@ export interface ExportResult {
   durationMs: number;
 }
 
+/** A changed row: its primary key as loaded, and the new values. */
+export interface RowEdit {
+  key: [string, Cell][];
+  set: [string, Cell][];
+}
+
+export interface EditResult {
+  statements: string[];
+  saved: number;
+}
+
 export interface HistoryEntry {
   id: string;
   connectionId: string;
@@ -264,6 +275,9 @@ export const api = {
   export: (args: ExportArgs) => call<ExportResult>("export", args),
   /** Default folder for exports (Downloads, else home). */
   exportDir: () => call<string>("export_dir"),
+  /** Saves edited rows in one transaction; `dryRun` only returns the statements. */
+  applyEdits: (args: { id: string; queryId: string; schema: string; table: string; edits: RowEdit[]; dryRun?: boolean }) =>
+    call<EditResult>("apply_edits", args),
   /** Opens the file manager with the file selected. */
   revealPath: (path: string) => call<void>("reveal_path", { path }),
   history: (limit = 300) => call<HistoryEntry[]>("history_list", { limit }),

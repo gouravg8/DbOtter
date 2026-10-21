@@ -2036,3 +2036,56 @@ pre.crash {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+/* ---------- editing cells ---------- */
+
+.grid-cell.edited {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+.grid-cell.editing {
+  padding: 0;
+  overflow: visible;
+}
+.cell-input {
+  width: 100%;
+  height: 100% !important;
+  padding: 0 9px !important;
+  font: inherit;
+  line-height: 24px !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent) !important;
+  background: var(--surface) !important;
+}
+.cell-textarea {
+  display: block;
+  width: 100%;
+  height: 320px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg));
+  border-top: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+.review-note {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+.review-sql {
+  max-height: 340px;
+  margin: 0;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

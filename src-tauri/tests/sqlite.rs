@@ -573,3 +573,40 @@ async fn export_tables_and_queries() {
     assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM log", None).await), json!("2"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn edits_save_all_or_nothing() {
+    let app = app();
+    let id = connected(&app, &seeded()).await;
+    let edits = |edits: Value, dry: bool| {
+        let app = &app;
+        let id = id.clone();
+        async move {
+            app.dispatch("apply_edits", json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "schema": "main",
+                "table": "customers", "edits": edits, "dryRun": dry })).await.map_err(|e| serde_json::to_value(e).unwrap())
+        }
+    };
+    let two = json!([
+        { "key": [["id", "1"]], "set": [["name", "Ada L."], ["country", null]] },
+        { "key": [["id", "2"]], "set": [["score", "9.5"]] },
+    ]);
+    let dry = edits(two.clone(), true).await.unwrap();
+    assert_eq!(dry["saved"], 0);
+    assert_eq!(dry["statements"][0], "UPDATE \"main\".\"customers\" SET \"name\" = 'Ada L.', \"country\" = NULL WHERE \"id\" = '1'");
+    assert_eq!(cell(&run(&app, &id, "SELECT name FROM customers WHERE id = 1", None).await), json!("Ada"));
+
+    assert_eq!(edits(two, false).await.unwrap()["saved"], 2);
+    let out = run(&app, &id, "SELECT name, country, score, typeof(score) FROM customers WHERE id IN (1, 2) ORDER BY id", None).await;
+    assert_eq!(out["results"][0]["rows"], json!([["Ada L.", null, "1.5", "real"], ["O'Brien \"the 50%_off\" guy", "Ireland", "9.5", "real"]]));
+
+    // the second row is gone: the first change isn't kept either
+    let err = edits(json!([
+        { "key": [["id", "3"]], "set": [["name", "changed"]] },
+        { "key": [["id", "999"]], "set": [["name", "nobody"]] },
+    ]), false).await.unwrap_err();
+    assert_eq!(err["code"], "stale_row", "{err}");
+    assert!(err["message"].as_str().unwrap().contains("id = 999"), "{err}");
+    assert_eq!(cell(&run(&app, &id, "SELECT name FROM customers WHERE id = 3", None).await), json!("Bea \"the 50 percent off\" decoy"));
+    // and the table isn't left locked
+    run(&app, &id, "UPDATE log SET msg = msg", None).await;
+}

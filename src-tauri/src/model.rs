@@ -272,6 +272,23 @@ pub struct Sort {
     pub desc: bool,
 }
 
+/// One row changed in the grid: the values that find it (its primary key, as loaded) and
+/// the new values, `None` for NULL.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RowEdit {
+    pub key: Vec<(String, Option<String>)>,
+    pub set: Vec<(String, Option<String>)>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditResult {
+    /// The UPDATE statements, in order (for review, or as run).
+    pub statements: Vec<String>,
+    /// Rows saved; 0 for a dry run.
+    pub saved: usize,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TableQuery {

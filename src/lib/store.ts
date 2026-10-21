@@ -84,6 +84,7 @@ export type DialogState =
   | { kind: "confirm"; title: string; body: string; action: string; onConfirm: () => void }
   | { kind: "risky"; connName: string; risks: Risk[]; onConfirm: () => void }
   | { kind: "export"; target: ExportTarget }
+  | { kind: "review"; connId: string; title: string; statements: string[]; onSave: (queryId: string) => Promise<void> }
   | null;
 
 /** What an export dialog writes: a table tab's rows (all pages, its filters and sort) or a
@@ -121,6 +122,9 @@ interface State {
   toasts: Toast[];
   /** Recently closed tabs, newest last (Ctrl/⌘ Shift T reopens). */
   closedTabs: Tab[];
+  /** Edited cells not saved yet, per tab (closing such a tab asks first). */
+  unsaved: Record<string, number>;
+  setUnsaved: (tabId: string, n: number) => void;
 
   setSettings: (patch: Partial<Settings>) => void;
   loadConnections: () => Promise<void>;
@@ -203,6 +207,7 @@ export const useApp = create<State>()(
       dialog: null,
       toasts: [],
       closedTabs: [],
+      unsaved: {},
 
       setSettings: (patch) => set({ settings: { ...get().settings, ...patch } }),
 
@@ -378,13 +383,16 @@ export const useApp = create<State>()(
         const i = tabs.findIndex((t) => t.id === id);
         if (i < 0) return;
         const open = tabs[i];
-        if (!force && open.kind === "query" && (open.tx === "open" || open.tx === "aborted")) {
+        const inTx = open.kind === "query" && (open.tx === "open" || open.tx === "aborted");
+        const unsaved = get().unsaved[id] ?? 0;
+        if (!force && (inTx || unsaved)) {
+          const what = [inTx && "an open transaction (closing rolls it back)", unsaved && `${unsaved} unsaved changed value${unsaved === 1 ? "" : "s"}`].filter(Boolean);
           set({
             dialog: {
               kind: "confirm",
-              title: `Close "${open.title}"?`,
-              body: "It has an open transaction: closing the tab rolls it back.",
-              action: "Close and roll back",
+              title: `Close "${open.kind === "query" ? open.title : open.kind === "table" ? open.table : "History"}"?`,
+              body: `It has ${what.join(" and ")}.`,
+              action: inTx ? "Close and roll back" : "Close and discard",
               onConfirm: () => get().closeTab(id, true),
             },
           });
@@ -405,14 +413,19 @@ export const useApp = create<State>()(
 
       closeTabs: (ids, keep, force = false) => {
         const pending = get().tabs.filter((t) => ids.includes(t.id) && t.kind === "query" && (t.tx === "open" || t.tx === "aborted"));
-        if (!force && pending.length) {
+        const edited = ids.filter((id) => get().unsaved[id]).length;
+        if (!force && (pending.length || edited)) {
           const n = pending.length;
+          const what = [
+            n && `${n} ${n === 1 ? "has an open transaction" : "have open transactions"} (closing rolls ${n === 1 ? "it" : "them"} back)`,
+            edited && `${edited} ${edited === 1 ? "has" : "have"} unsaved changes`,
+          ].filter(Boolean);
           set({
             dialog: {
               kind: "confirm",
               title: `Close ${ids.length} tab${ids.length === 1 ? "" : "s"}?`,
-              body: `${n} of them ${n === 1 ? "has an open transaction" : "have open transactions"}: closing rolls ${n === 1 ? "it" : "them"} back.`,
-              action: "Close and roll back",
+              body: `Of them, ${what.join(" and ")}.`,
+              action: n ? "Close and roll back" : "Close and discard",
               onConfirm: () => get().closeTabs(ids, keep, true),
             },
           });
@@ -553,6 +566,13 @@ export const useApp = create<State>()(
         set({ toasts: [...get().toasts, t].slice(-4) });
         // time to read it and reach for the button
         setTimeout(() => get().dismissToast(t.id), action ? 10000 : kind === "error" ? 6000 : 2200);
+      },
+      setUnsaved: (tabId, n) => {
+        if ((get().unsaved[tabId] ?? 0) === n) return;
+        const unsaved = { ...get().unsaved };
+        if (n) unsaved[tabId] = n;
+        else delete unsaved[tabId];
+        set({ unsaved });
       },
       dismissToast: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
 

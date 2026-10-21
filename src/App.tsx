@@ -3,6 +3,7 @@ import { Component, useEffect, useState, type ReactNode } from "react";
 import { Kbd } from "./components/ui";
 import { StatusBar, TabBar, Toasts } from "./components/Chrome";
 import { CommandPalette } from "./components/CommandPalette";
+import { ReviewDialog } from "./components/Edits";
 import { ExportDialog } from "./components/ExportDialog";
 import { ConfirmDialog, ConnectionDialog, PasswordPrompt, RiskyDialog } from "./components/ConnectionDialog";
 import { HistoryTab } from "./components/HistoryTab";
@@ -226,6 +227,7 @@ export default function App() {
       {dialog?.kind === "confirm" && <ConfirmDialog {...dialog} />}
       {dialog?.kind === "risky" && <RiskyDialog {...dialog} />}
       {dialog?.kind === "export" && <ExportDialog target={dialog.target} />}
+      {dialog?.kind === "review" && <ReviewDialog {...dialog} />}
       <Toasts />
     </div>
     </ErrorBoundary>

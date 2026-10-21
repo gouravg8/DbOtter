@@ -1,12 +1,14 @@
 import { Braces, CircleAlert, Copy, Download, History, Play, Sheet, Square } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, type ColumnInfo } from "../lib/api";
+import { editability, simpleSelect, withPending, type Editability } from "../lib/edits";
 import { codeLabel } from "../lib/dialect";
 import { exportStatement } from "../lib/export";
 import { formatCount, formatDuration, toCsv, toJson } from "../lib/format";
 import { MOD, modKey, useApp, type QueryTab as QueryTabState } from "../lib/store";
 import { ConnectionPicker } from "./ConnectionPicker";
 import { DataGrid } from "./DataGrid";
+import { useEdits } from "./Edits";
 import { SqlEditor, type SqlEditorHandle } from "./SqlEditor";
 import { Kbd, Spinner, copyText } from "./ui";
 
@@ -89,7 +91,63 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
     if (active) window.dispatchEvent(new CustomEvent("dbotter:vim-mode", { detail: vimMode }));
   }, [active, vimMode]);
 
-  const run = (sql: string, offset: number) => void runQuery(tab.id, sql, offset);
+  const result = tab.output?.results[tab.activeResult];
+
+  // the result's rows are one table's rows (SELECT * / plain columns FROM it): editable
+  const source = useMemo((): { error: string } | { schema: string; table: string; columns: string[] | null } | null => {
+    if (!result?.hasRows || !tab.outputSql || !tab.output) return null;
+    const stmt = exportStatement(tab.outputSql, tab.output.results.length, tab.activeResult);
+    const sel = stmt ? simpleSelect(stmt) : null;
+    if (!sel) return { error: "only a SELECT of plain columns from one table can be edited" };
+    // names as the schema has them (Postgres folds unquoted names to lower case)
+    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    const schemas = session?.schema?.schemas ?? [];
+    const want = sel.schema ?? session?.info?.defaultSchema ?? "";
+    const sch = schemas.find((s) => s.name === want) ?? schemas.find((s) => same(s.name, want));
+    const rel = sch?.relations.find((r) => r.name === sel.table) ?? sch?.relations.find((r) => same(r.name, sel.table));
+    if (!sch || !rel) return { error: `the table ${sel.table} isn't in the schema list (refresh it?)` };
+    if (rel.kind !== "table") return { error: "views can't be edited here" };
+    return { schema: sch.name, table: rel.name, columns: sel.columns };
+  }, [result, tab.output, tab.outputSql, tab.activeResult, session?.schema, session?.info?.defaultSchema]);
+  const sourceKey = source && !("error" in source) ? `${tab.connId}:${source.schema}.${source.table}` : null;
+  const [tableCols, setTableCols] = useState<{ key: string; columns?: ColumnInfo[]; error?: string } | null>(null);
+  useEffect(() => {
+    if (!sourceKey || !tab.connId || !source || "error" in source || tableCols?.key === sourceKey) return;
+    let live = true;
+    api
+      .structure(tab.connId, source.schema, source.table)
+      .then((s) => live && setTableCols({ key: sourceKey, columns: s.columns }))
+      .catch((e) => live && setTableCols({ key: sourceKey, error: `couldn't read the table (${e.message})` }));
+    return () => {
+      live = false;
+    };
+  }, [sourceKey, source, tab.connId, tableCols?.key]);
+  const editInfo = useMemo((): Editability | null => {
+    if (!result?.hasRows || !source) return null;
+    if ("error" in source) return { ok: false, reason: source.error };
+    if (conn?.readOnly) return { ok: false, reason: "the connection is read-only" };
+    if (tableCols?.key !== sourceKey) return null;
+    if (!tableCols.columns) return { ok: false, reason: tableCols.error ?? "the table wasn't found" };
+    return editability(result.columns, tableCols.columns, source.columns);
+  }, [result, source, conn?.readOnly, tableCols, sourceKey]);
+  const edits = useEdits({
+    tabId: tab.id,
+    connId: tab.connId,
+    target: source && !("error" in source) ? source : null,
+    columns: result?.columns ?? [],
+    rows: result?.rows ?? [],
+    info: editInfo,
+    resetKey: result,
+    // the saved values go into the shown result (running the query again might not be wanted)
+    onSaved: (pending) => {
+      const out = useApp.getState().tabs.find((t) => t.id === tab.id);
+      if (out?.kind !== "query" || !out.output) return;
+      const results = out.output.results.map((r, i) => (i === out.activeResult ? { ...r, rows: withPending(r.rows, pending) } : r));
+      updateTab(tab.id, { output: { ...out.output, results } });
+    },
+  });
+
+  const run = (sql: string, offset: number) => edits.guard(() => void runQuery(tab.id, sql, offset));
   const runCurrent = () => {
     const q = editor.current?.current();
     if (q) run(q.sql, q.offset);
@@ -109,7 +167,6 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.error]);
 
-  const result = tab.output?.results[tab.activeResult];
   // a height saved in a bigger window must still leave room for the results
   const height = Math.max(80, Math.min(tab.editorHeight ?? 260, rootH ? rootH - 160 : Infinity));
 
@@ -262,7 +319,7 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
                     role="tab"
                     aria-selected={i === tab.activeResult}
                     className={`result-tab ${i === tab.activeResult ? "active" : ""}`}
-                    onClick={() => updateTab(tab.id, { activeResult: i })}
+                    onClick={() => i !== tab.activeResult && edits.guard(() => updateTab(tab.id, { activeResult: i }))}
                   >
                     {i + 1}. {r.hasRows ? `${formatCount(r.rows.length)} row${r.rows.length === 1 ? "" : "s"}` : `${formatCount(r.rowCount)} affected`}
                   </button>
@@ -275,6 +332,10 @@ export function QueryTab({ tab, active }: { tab: QueryTabState; active: boolean 
                 rows={result.rows}
                 vim={settings.vim}
                 resetKey={result}
+                editable={edits.editable}
+                readOnlyReason={edits.readOnlyReason}
+                pending={edits.pending}
+                onEdit={edits.onEdit}
               />
             ) : (
               <div className="results-message">

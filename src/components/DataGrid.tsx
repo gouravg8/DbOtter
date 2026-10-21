@@ -1,11 +1,13 @@
 /**
- * Read-only result grid. Only the rows and columns in view are rendered, so 100k rows cost
- * the same as 100. Keyboard: arrows (or h j k l with vim keys), Shift to extend, Enter to
- * view a value, Ctrl/⌘ C or y to copy, Y to copy whole rows, gg / G, Ctrl d / u.
+ * Result grid. Only the rows and columns in view are rendered, so 100k rows cost the same
+ * as 100. Keyboard: arrows (or h j k l with vim keys), Shift to extend, Enter to view a
+ * value, Ctrl/⌘ C or y to copy, Y to copy whole rows, gg / G, Ctrl d / u. With `onEdit`,
+ * F2 (vim: i) or a double-click edits a cell; the owner keeps the changes until saved.
  */
-import { ArrowDown, ArrowUp, Braces, Copy, Eye, Filter, Rows3, Sheet } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Braces, Copy, Eye, Filter, Pencil, Rows3, Sheet, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Cell } from "../lib/api";
+import { cellKey, type Pending } from "../lib/edits";
 import { toCsv, toJson, toTsv } from "../lib/format";
 import { modKey, MOD } from "../lib/store";
 import { Modal, copyText, useMenu } from "./ui";
@@ -28,6 +30,14 @@ interface Props {
   /** Changing it scrolls back to the top and clears the selection (new result). */
   resetKey?: unknown;
   autoFocus?: boolean;
+  /** Per column, whether it can be edited; with `onEdit`. */
+  editable?: boolean[];
+  /** Why nothing can be edited, shown in the cell menu. */
+  readOnlyReason?: string;
+  /** Changed values by `row:column`, shown instead of the loaded ones. */
+  pending?: Pending;
+  /** A cell was edited (to the value it had: the owner drops the change). */
+  onEdit?: (r: number, c: number, value: Cell) => void;
 }
 
 const ROW_H = 26;
@@ -92,6 +102,10 @@ export const DataGrid = memo(function DataGrid({
   vim,
   resetKey,
   autoFocus,
+  editable,
+  readOnlyReason,
+  pending,
+  onEdit,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<number[] | null>(null);
@@ -110,6 +124,10 @@ export const DataGrid = memo(function DataGrid({
     setAnchorState(p);
   };
   const [viewer, setViewer] = useState<Pos | null>(null);
+  // the cell being edited in place; `touched` once typed in (Enter on NULL keeps NULL)
+  const [editing, setEditing] = useState<(Pos & { text: string; touched: boolean }) | null>(null);
+  // values with line breaks or long ones are edited in a dialog
+  const [editDialog, setEditDialog] = useState<Pos | null>(null);
   const dragging = useRef(false);
   const pendingG = useRef(0);
   const menu = useMenu();
@@ -203,6 +221,27 @@ export const DataGrid = memo(function DataGrid({
     scrollIntoView(q);
   };
 
+  const valueAt = (p: Pos): Cell => {
+    const k = cellKey(p.r, p.c);
+    return pending && k in pending ? pending[k] : rows[p.r][p.c];
+  };
+  const canEdit = (c: number) => !!onEdit && !!editable?.[c];
+  /** Starts editing; false when the cell can't be edited. */
+  const startEdit = (p: Pos) => {
+    if (!canEdit(p.c)) return false;
+    const v = valueAt(p);
+    if (v !== null && (v.includes("\n") || v.length > 500)) setEditDialog(p);
+    else setEditing({ ...p, text: v ?? "", touched: false });
+    return true;
+  };
+  const finishEdit = (save: boolean, move?: Pos) => {
+    const e = editing;
+    setEditing(null);
+    if (e && save && e.touched) onEdit?.(e.r, e.c, e.text);
+    ref.current?.focus({ preventScroll: true });
+    if (move) moveTo(move, false);
+  };
+
   const selectedCols = () => (sel ? columns.slice(sel.c0, sel.c1 + 1).map((c) => c.name) : []);
   const latestSel = () => selOf(cur.current.active, cur.current.anchor);
 
@@ -222,7 +261,8 @@ export const DataGrid = memo(function DataGrid({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!rows.length) return;
+    // the cell editor handles its own keys
+    if (!rows.length || editing) return;
     const { active, anchor } = cur.current;
     const p = active ?? { r: 0, c: 0 };
     const k0 = e.key;
@@ -277,6 +317,9 @@ export const DataGrid = memo(function DataGrid({
       copySelection();
     } else if (vimKey && k === "Y") {
       copyRows();
+    } else if (active && (k === "F2" || (vimKey && k === "i")) && onEdit) {
+      e.preventDefault();
+      startEdit(active);
     } else if ((k === "Enter" && !mod) || (vimKey && k === "o")) {
       if (active) {
         e.preventDefault();
@@ -301,7 +344,19 @@ export const DataGrid = memo(function DataGrid({
     const full = rows.slice(s.r0, s.r1 + 1);
     const value = rows[p.r][p.c];
     const col = columns[p.c].name;
+    const changed = !!pending && cellKey(p.r, p.c) in pending;
+    const editItems = !onEdit
+      ? []
+      : canEdit(p.c)
+        ? [
+            { label: "Edit value", icon: <Pencil size={14} />, hint: "F2", onSelect: () => startEdit(p) },
+            { label: "Set to NULL", icon: <Ban size={14} />, disabled: valueAt(p) === null, onSelect: () => onEdit(p.r, p.c, null) },
+            ...(changed ? [{ label: "Undo change", icon: <Undo2 size={14} />, onSelect: () => onEdit(p.r, p.c, value) }] : []),
+            "divider" as const,
+          ]
+        : [{ label: readOnlyReason ? `Can't edit: ${readOnlyReason}` : "This column can't be edited", icon: <Pencil size={14} />, disabled: true, onSelect: () => {} }, "divider" as const];
     menu.open(e.clientX, e.clientY, [
+      ...editItems,
       { label: "Copy value", icon: <Copy size={14} />, hint: `${MOD} C`, onSelect: () => copyText(value ?? "", "Copied value") },
       { label: "View value", icon: <Eye size={14} />, hint: "Enter", onSelect: () => setViewer(p) },
       "divider",
@@ -425,19 +480,23 @@ export const DataGrid = memo(function DataGrid({
                 </div>
                 <div style={{ width: offsets[c0], flex: "none" }} />
                 {visibleCols.map(({ c, col }) => {
-                  const v = row[c];
+                  const k = cellKey(r, c);
+                  const changed = !!pending && k in pending;
+                  const v = changed ? pending![k] : row[c];
                   const isActive = active?.r === r && active.c === c;
                   const inSel = rowSel && c >= sel!.c0 && c <= sel!.c1;
+                  const isEditing = editing?.r === r && editing.c === c;
                   return (
                     <div
                       key={c}
                       role="gridcell"
                       className={`grid-cell ${v === null ? "is-null" : ""} ${col.type && NUMERIC.test(col.type) ? "num" : ""} ${
                         inSel ? "in-sel" : ""
-                      } ${isActive ? "active" : ""}`}
+                      } ${isActive ? "active" : ""} ${changed ? "edited" : ""} ${isEditing ? "editing" : ""}`}
                       style={{ width: w[c] }}
+                      title={changed ? `Changed (was ${row[c] === null ? "NULL" : row[c]})` : undefined}
                       onMouseDown={(e) => {
-                        if (e.button !== 0) return;
+                        if (e.button !== 0 || isEditing) return;
                         e.preventDefault();
                         ref.current?.focus({ preventScroll: true });
                         dragging.current = true;
@@ -445,10 +504,38 @@ export const DataGrid = memo(function DataGrid({
                         if (!e.shiftKey || !anchor) setAnchor({ r, c });
                       }}
                       onMouseEnter={() => dragging.current && setActive({ r, c })}
-                      onDoubleClick={() => setViewer({ r, c })}
-                      onContextMenu={(e) => contextMenu(e, { r, c })}
+                      onDoubleClick={() => isEditing || startEdit({ r, c }) || setViewer({ r, c })}
+                      onContextMenu={(e) => !isEditing && contextMenu(e, { r, c })}
                     >
-                      {v === null ? "NULL" : display(v)}
+                      {isEditing ? (
+                        <input
+                          className="cell-input"
+                          autoFocus
+                          value={editing.text}
+                          placeholder={v === null ? "NULL" : ""}
+                          spellCheck={false}
+                          aria-label={`Edit ${col.name}`}
+                          onChange={(e) => setEditing({ ...editing, text: e.target.value, touched: true })}
+                          onBlur={() => finishEdit(true)}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              finishEdit(true);
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              finishEdit(false);
+                            } else if (e.key === "Tab") {
+                              e.preventDefault();
+                              finishEdit(true, { r, c: c + (e.shiftKey ? -1 : 1) });
+                            }
+                          }}
+                        />
+                      ) : v === null ? (
+                        "NULL"
+                      ) : (
+                        display(v)
+                      )}
                     </div>
                   );
                 })}
@@ -472,6 +559,18 @@ export const DataGrid = memo(function DataGrid({
           }}
         />
       )}
+      {editDialog && rows[editDialog.r] && (
+        <CellEditor
+          column={columns[editDialog.c]}
+          value={valueAt(editDialog)}
+          row={rowOffset + editDialog.r + 1}
+          onSave={(v) => onEdit?.(editDialog.r, editDialog.c, v)}
+          onClose={() => {
+            setEditDialog(null);
+            ref.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {sel && (sel.r0 !== sel.r1 || sel.c0 !== sel.c1) && (
         <div className="grid-selinfo">
           {sel.r1 - sel.r0 + 1} × {sel.c1 - sel.c0 + 1} selected · {selectedCols().length > 1 ? "y / " : ""}
@@ -481,6 +580,56 @@ export const DataGrid = memo(function DataGrid({
     </div>
   );
 });
+
+/** A long or multi-line value, edited in a dialog. Ctrl/⌘ Enter applies. */
+function CellEditor({ column, value, row, onSave, onClose }: { column: GridColumn; value: Cell; row: number; onSave: (v: Cell) => void; onClose: () => void }) {
+  const [text, setText] = useState(value ?? "");
+  const apply = (v: Cell) => {
+    onSave(v);
+    onClose();
+  };
+  return (
+    <Modal
+      title={
+        <>
+          Edit {column.name} <span className="muted">· row {row}{column.type ? ` · ${column.type}` : ""}</span>
+        </>
+      }
+      onClose={onClose}
+      width={640}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={() => apply(null)} disabled={value === null}>
+            <Ban size={14} /> Set to NULL
+          </button>
+          <div className="spacer" />
+          <button type="button" className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={() => apply(text)}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <textarea
+        className="cell-textarea"
+        autoFocus
+        value={text}
+        spellCheck={false}
+        placeholder={value === null ? "NULL" : ""}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && modKey(e)) {
+            e.preventDefault();
+            apply(text);
+          }
+        }}
+      />
+      <p className="muted small">{MOD} Enter applies. The change is saved when you review and save the table's changes.</p>
+    </Modal>
+  );
+}
 
 function ValueViewer({ column, value, row, vim, onClose }: { column: GridColumn; value: Cell; row: number; vim: boolean; onClose: () => void }) {
   const text = value === null ? null : pretty(value);

@@ -35,14 +35,20 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 - Structure: columns (type, nullable, default, primary key, comment), indexes with definitions and sizes, constraints, view definitions, table size
 
 **Query**
-- SQL editor: highlighting and keywords for the connection's dialect (PostgreSQL, MySQL, MariaDB, SQLite), autocomplete for schemas, tables and columns
+- SQL editor: highlighting and keywords for the connection's dialect (PostgreSQL, MySQL, MariaDB, SQLite), autocomplete for schemas, tables and columns; the columns of the tables a statement uses (FROM, JOIN, UPDATE, INTO, aliases) come first, no `table.` needed
 - `Ctrl/⌘ Enter` runs the selection or the statement under the cursor; `Ctrl/⌘ Shift Enter` runs everything
 - Several statements: one result per statement; row count and timing; errors show the database's message, detail, hint and code (SQLSTATE for Postgres), and underline the failing token
+
+**Edit data**
+- Double-click a cell (or F2, or `i` with vim keys) to edit it, in a table tab or in a query result that is `SELECT *` or plain columns from one table; right-click for Set to NULL and Undo change
+- Changed cells stay highlighted and nothing is written until **Review & save**, which shows the `UPDATE`s and runs them in one transaction on a session of its own
+- Rows are found by their primary key as loaded: if one was deleted or its key changed meanwhile, nothing is saved
+- Tables without a primary key, views, computed or aliased result columns, generated and binary columns, and read-only connections can't be edited; paging, sorting, re-running or closing the tab asks before dropping unsaved changes
 
 **Export**
 - Export a whole table (every page, with the tab's filters and sort) or a query's result to a file as CSV, JSON or SQL `INSERT`s: the Export button, or "Export…" in the command palette
 - Streamed to disk as rows arrive, so a large table never sits in memory, and with no row limit
-- Saved to Downloads by default (or Browse… for another place); an existing file is only replaced when you say so; cancel any time
+- Saved to Downloads by default (or Browse… for another place); an existing file is only replaced when you say so; cancel any time; Show in folder from the notification
 - A failed or cancelled export leaves no partial file, and never damages the file it was replacing
 - CSV: a header row, NULL as an empty field and an empty string as `""`. JSON: an array of objects. SQL: batched `INSERT`s in the connection's dialect that load back unchanged (binary as `X'…'`, MySQL `BIT` as `b'…'`)
 - A query result is exported by running its statement again (in the tab's own session), so only one statement that reads can be exported
@@ -58,6 +64,7 @@ webview instead of bundling Chromium, so the app is a single ~9 MB binary.
 **Look and keyboard**
 - Themes: System (follows the OS), Otter Light / Dark, One Dark, Gruvbox Dark, Catppuccin Mocha / Latte, Nord
 - Custom themes from a JSON file (Settings → Import theme); start from "Copy theme as JSON"
+- Fonts (Settings → Fonts): any installed font for the interface and for the editor and grids, with a preview
 - Vim mode: full vim in the editor (lazy-loaded, ~120 KB only when enabled; `Ctrl W / R / B / E / F / G` belong to vim there, `:q` closes the tab), plus `h j k l`, `gg`, `G`, `0`, `$`, `y` / `Y`, `Ctrl d / u` in grids and `j k h l` in the sidebar
 - Command palette, tabs, and shortcuts for everything; right-click a tab to close others, those to the left or right, all of them, or all tabs of one database
 
@@ -205,7 +212,7 @@ v0.0.2 lets you reach any database, change data safely, and get data out.
    connections (reads only are retried, never writes); a PgBouncer mode without prepared
    statements, so transaction poolers such as Supabase's port 6543 work; a clear "connection
    lost" state.
-3. **Edit data with a review step**: edit cells, add and delete rows (tables with a primary
+3. ✅ **Edit data with a review step** (editing cells; adding and deleting rows still to come): edit cells, add and delete rows (tables with a primary
    key). Changes stay pending and highlighted until you review the generated SQL and commit
    them in one transaction; discard drops them all.
 4. ✅ **Production safety**: read-only connections (refused in the app and opened as read-only

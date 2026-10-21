@@ -202,6 +202,21 @@ impl App {
                 };
                 ok(self.db.export(&a.id, &a.query_id, &a.source, file, a.editor.as_deref()).await?)
             }
+            "apply_edits" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct A {
+                    id: String,
+                    query_id: String,
+                    schema: String,
+                    table: String,
+                    edits: Vec<RowEdit>,
+                    #[serde(default)]
+                    dry_run: bool,
+                }
+                let a: A = args(a)?;
+                ok(self.db.apply_edits(&a.id, &a.query_id, &a.schema, &a.table, &a.edits, a.dry_run).await?)
+            }
             "export_dir" => ok(crate::export::default_dir().display().to_string()),
             "reveal_path" => {
                 #[derive(Deserialize)]

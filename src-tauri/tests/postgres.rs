@@ -674,3 +674,40 @@ async fn export_tables_and_queries() {
     assert_eq!(left, ["customers.sql", "orders.csv", "q.json"]);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn edits_save_all_or_nothing() {
+    let Some(port) = port() else { return };
+    let app = app();
+    let id = saved(&app, port, "postgres").await;
+    call(&app, "connect", json!({ "id": id })).await;
+    run(&app, &id, "DROP TABLE IF EXISTS edit_t; CREATE TABLE edit_t (id int PRIMARY KEY, n int, tags text[], at timestamptz, note text);
+        INSERT INTO edit_t VALUES (1, 1, '{a}', '2026-01-01 00:00:00+00', 'x'), (2, 2, NULL, NULL, NULL)", None).await;
+    let edits = |edits: Value| {
+        let app = &app;
+        let id = id.clone();
+        async move {
+            app.dispatch("apply_edits", json!({ "id": id, "queryId": uuid::Uuid::new_v4().to_string(), "schema": "public",
+                "table": "edit_t", "edits": edits })).await.map_err(|e| serde_json::to_value(e).unwrap())
+        }
+    };
+    // text goes into typed columns as the server converts it
+    let ok = edits(json!([{ "key": [["id", "1"]], "set": [["n", "42"], ["tags", "{b,c}"], ["at", "2026-02-03 04:05:06+00"], ["note", null]] }])).await.unwrap();
+    assert_eq!(ok["saved"], 1);
+    let row = run(&app, &id, "SELECT n, tags[2], extract(month from at at time zone 'UTC'), note IS NULL FROM edit_t WHERE id = 1", None).await;
+    assert_eq!(row["results"][0]["rows"][0], json!(["42", "c", "2", "t"]));
+
+    // a bad value fails the whole save
+    let err = edits(json!([
+        { "key": [["id", "2"]], "set": [["note", "kept?"]] },
+        { "key": [["id", "1"]], "set": [["n", "not a number"]] },
+    ])).await.unwrap_err();
+    assert_eq!(err["code"], "22P02", "{err}");
+    assert_eq!(cell(&run(&app, &id, "SELECT count(*) FROM edit_t WHERE note = 'kept?'", None).await), json!("0"));
+    // a stale key too, and the edit session is gone afterwards
+    let err = edits(json!([{ "key": [["id", "7"]], "set": [["n", "1"]] }])).await.unwrap_err();
+    assert_eq!(err["code"], "stale_row");
+    let sessions = run(&app, &id, "SELECT count(*) FROM pg_stat_activity WHERE datname = 'shop' AND state = 'idle in transaction'", None).await;
+    assert_eq!(cell(&sessions), json!("0"));
+    run(&app, &id, "DROP TABLE edit_t", None).await;
+}
