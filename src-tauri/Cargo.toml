@@ -1,7 +1,7 @@
 [package]
 name = "dbotter"
 version = "0.0.1"
-description = "A fast, keyboard-first PostgreSQL client"
+description = "A fast, keyboard-first client for PostgreSQL, MySQL / MariaDB and SQLite"
 authors = ["Gourav Soni"]
 edition = "2024"
 
