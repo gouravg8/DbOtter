@@ -225,7 +225,7 @@ src/
   lib/         api client, app store, themes, SQL statement splitter, formatting
   components/  sidebar, tabs, SQL editor, data grid, dialogs, palette, settings
 e2e/           Playwright tests
-scripts/       test databases (Postgres, MySQL)
+scripts/       test databases (Postgres, MySQL); release.py checks a release before it goes out
 ```
 
 ## Roadmap: v0.0.2
