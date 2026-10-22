@@ -27,3 +27,6 @@ dist-ssr
 .test-db
 test-results
 playwright-report
+
+# Python
+__pycache__
